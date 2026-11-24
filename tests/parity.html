@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>parity</title>
+<script type="module">
+  import { Detector, blobToCanvas, predict, validateHead } from "/web/pipeline.js";
+  window.runParity = async (files, headUrl) => {
+    const det = await Detector.create("/web");
+    const head = validateHead(await (await fetch(headUrl)).json());
+    const out = [];
+    for (const f of files) {
+      const canvas = await blobToCanvas(await (await fetch(f)).blob());
+      const ex = det.extract(canvas);
+      out.push({
+        file: f,
+        boxes: ex.boxes && Object.fromEntries(Object.entries(ex.boxes).map(([k, b]) => [k, [b.x0, b.y0, b.x1, b.y1]])),
+        feature: ex.feature ? Array.from(ex.feature) : null,
+        probs: ex.feature ? predict(head, ex.feature) : null,
+      });
+    }
+    return out;
+  };
+  window.ready = true;
+</script>

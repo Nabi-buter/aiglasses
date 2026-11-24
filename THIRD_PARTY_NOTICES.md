@@ -1,0 +1,18 @@
+# Third-party notices
+
+## MediaPipe Tasks Vision (web/vendor/)
+`@mediapipe/tasks-vision` 1.2.2 — Copyright Google LLC — Apache License 2.0
+https://github.com/google-ai-edge/mediapipe · https://www.apache.org/licenses/LICENSE-2.0
+
+## MediaPipe models (web/models/)
+- `face_landmarker.task` — MediaPipe Face Landmarker
+- `mobilenet_v3_large.tflite` — MediaPipe Image Embedder (MobileNetV3-Large)
+
+Copyright Google LLC — Apache License 2.0. Downloaded from
+https://storage.googleapis.com/mediapipe-models/ by `scripts/fetch_assets.sh`.
+Model cards: https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker ,
+https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder
+
+## Test image
+`tests/make_synthetic.py` uses `skimage.data.astronaut()` (NASA photograph of Eileen Collins, public domain),
+which ships with scikit-image. No image is stored in this repository.

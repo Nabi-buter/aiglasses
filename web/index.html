@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI 안경 판독기</title>
+<meta name="description" content="시험 감독관이 응시자의 안경을 촬영하면 기기 안에서 AI 안경 여부를 판독합니다. 사진은 외부로 전송되지 않습니다.">
+<meta name="theme-color" content="#1f4e79">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 46 30'%3E%3Crect x='2' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Crect x='27' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Ccircle cx='6' cy='10.5' r='2.5' fill='%23c8323c'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect x="2" y="7" width="17" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <rect x="27" y="7" width="17" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="M19 12 q4 -3 8 0" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <circle cx="6" cy="10.5" r="2" fill="#c8323c"/>
+        <circle cx="40" cy="10.5" r="2" fill="#c8323c"/>
+      </svg>
+      <div>
+        <h1>AI 안경 판독기</h1>
+        <p class="sub">시험 감독용 · 사진은 이 기기 안에서만 판독되고 어디에도 전송되지 않습니다</p>
+      </div>
+    </div>
+    <span class="svc"><span class="dot" id="svcDot"></span><span id="svcText">판독 모델 불러오는 중…</span></span>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-shoot">
+        <h2 id="h-shoot"><span><span class="step">1</span>촬영</span><span id="camName" style="font-weight:500;letter-spacing:0"></span></h2>
+        <div class="vf" id="vf">
+          <video id="video" playsinline muted autoplay hidden></video>
+          <div class="guide" id="guide" hidden></div>
+          <span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
+          <span class="zoomtag" id="zoomTag" hidden>1.0×</span>
+          <div class="msg" id="vfMsg"><p id="vfMsgText">카메라를 켜는 중입니다…</p></div>
+          <div class="flash" id="flash"></div>
+        </div>
+
+        <div class="controls" id="liveControls" hidden>
+          <button class="shutter" id="shutter" aria-label="촬영" title="촬영 (스페이스바)"></button>
+          <label class="zoom" for="zoom">확대
+            <input type="range" id="zoom" min="1" max="3" step="0.1" value="1">
+          </label>
+          <button class="small" id="flip" hidden>카메라 전환</button>
+        </div>
+
+        <div class="controls">
+          <label class="btn" for="fileCam">기기 카메라로 촬영
+            <input type="file" id="fileCam" accept="image/*" capture="environment">
+          </label>
+          <label class="btn ghost" for="fileUp">사진 불러오기
+            <input type="file" id="fileUp" accept="image/*" multiple>
+          </label>
+          <button class="ghost small" id="retryCam" hidden>실시간 카메라 다시 시도</button>
+        </div>
+
+        <div class="fields">
+          <label class="f" for="seat">수험번호 / 좌석
+            <input id="seat" type="text" autocomplete="off" placeholder="예: 12번 좌석">
+          </label>
+          <label class="f" for="room">고사실
+            <input id="room" type="text" autocomplete="off" placeholder="예: 본관 302">
+          </label>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-tray">
+        <h2 id="h-tray"><span><span class="step">2</span>촬영함</span><span id="trayCount" style="font-weight:500;letter-spacing:0">0 / 3</span></h2>
+        <div class="tray" id="tray"></div>
+        <p class="hint">얼굴과 안경이 함께 나오게 찍어 주세요. 정면 1장에 측면 1장을 더하면 다리(템플)와 경첩 쪽 카메라가 잘 보입니다.</p>
+        <div class="analyze-row">
+          <button class="primary" id="analyze" disabled>판독하기</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <details class="check" id="checklist">
+          <summary>육안 확인 포인트</summary>
+          <ol class="cl">
+            <li><span><b>경첩 부근 작은 원형 렌즈</b> — 안경테 앞면 양쪽 모서리. 대부분의 카메라형 AI 안경이 여기에 카메라를 둡니다.</span></li>
+            <li><span><b>카메라 옆 LED 표시등</b> — 촬영·녹화 중 점등. 꺼져 있어도 작은 반투명 점이 보입니다.</span></li>
+            <li><span><b>두껍고 각진 다리(템플)</b> — 배터리·스피커·칩이 들어가 일반 안경보다 눈에 띄게 굵습니다.</span></li>
+            <li><span><b>귀 근처 다리 안쪽 스피커 구멍</b> — 오픈형 스피커 그릴이나 미세한 타공.</span></li>
+            <li><span><b>다리 바깥쪽 터치패드·버튼</b> — 매끈한 터치 면이나 작은 물리 버튼.</span></li>
+            <li><span><b>렌즈 속 사각 반사·무지개빛 무늬</b> — 디스플레이형(도파관) 안경. 렌즈 일부에 글자나 녹색 빛이 비치기도 합니다.</span></li>
+            <li><span><b>벗겨서 확인</b> — 다리 안쪽 충전 단자, 전원 스위치, 브랜드 각인. 의심되면 응시자에게 안경을 벗어 제출하도록 요청하세요.</span></li>
+          </ol>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-result" aria-live="polite">
+        <h2 id="h-result"><span><span class="step">3</span>판독 결과</span></h2>
+        <div id="result"></div>
+        <p class="disclaimer">자동 판독은 감독 보조 수단입니다. 오판할 수 있으니 최종 판단은 감독관이 직접 안경을 확인한 뒤 내리세요.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-log">
+        <h2 id="h-log"><span>감독 기록</span>
+          <span style="display:flex;gap:6px">
+            <button class="small ghost" id="exportCsv">CSV 저장</button>
+            <button class="small ghost" id="clearLog">비우기</button>
+          </span>
+        </h2>
+        <div class="counts" id="counts"></div>
+        <div id="confirmBox" hidden></div>
+        <div class="logwrap"><table class="log">
+          <thead><tr><th>사진</th><th>시각</th><th>좌석</th><th>판정</th><th>AI 확률</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table></div>
+        <p class="hint">기록은 이 기기의 브라우저에만 남습니다.</p>
+      </section>
+
+      <section class="panel model" aria-labelledby="h-model">
+        <h2 id="h-model"><span>판독 모델</span>
+          <span style="display:flex;gap:6px">
+            <label class="btn small ghost" for="headFile">모델 파일 불러오기
+              <input type="file" id="headFile" accept=".json,application/json">
+            </label>
+            <button class="small ghost" id="resetHead" hidden>기본 모델로</button>
+          </span>
+        </h2>
+        <div id="modelInfo"></div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span>MediaPipe Face Landmarker + MobileNetV3 임베더 + 학습된 분류기 · 모두 브라우저에서 실행</span>
+    <a href="https://github.com/" id="repoLink" rel="noopener">소스 코드 · 모델 학습 방법</a>
+  </footer>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

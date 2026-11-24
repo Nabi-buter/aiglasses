@@ -1,0 +1,6 @@
+# 웹 앱(web/vendor/vision_bundle.mjs, @mediapipe/tasks-vision 1.2.2)과 같은 버전으로 맞춥니다.
+mediapipe==1.2.2
+numpy>=1.26
+pillow>=10
+pillow-heif>=0.16
+scikit-learn>=1.4

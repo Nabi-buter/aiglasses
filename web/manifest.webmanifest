@@ -1,0 +1,11 @@
+{
+  "name": "AI 안경 판독기",
+  "short_name": "AI안경판독",
+  "description": "시험 감독용 AI 안경 판독기. 사진은 기기 안에서만 판독됩니다.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#eef1f4",
+  "theme_color": "#1f4e79",
+  "lang": "ko",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
