@@ -1,7 +1,7 @@
 {
   "name": "AI 안경 판독기",
   "short_name": "AI안경판독",
-  "description": "시험 감독용 AI 안경 판독기. 사진은 기기 안에서만 판독됩니다.",
+  "description": "시험 감독용 실시간 AI 안경 판독기. 영상은 기기 안에서만 처리됩니다.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#eef1f4",

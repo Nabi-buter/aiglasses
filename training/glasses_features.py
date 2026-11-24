@@ -40,6 +40,7 @@ EMBEDDER_FILE = "mobilenet_v3_large.tflite"
 FACE_FILE = "face_landmarker.task"
 EMBED_DIM = 1280
 FEATURE_DIM = EMBED_DIM * 2
+MAX_FACES = 8  # == web/pipeline.js MAX_FACES
 
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent / "web" / "models"
 
@@ -143,7 +144,7 @@ class FeatureExtractor:
         self._face = vision.FaceLandmarker.create_from_options(
             vision.FaceLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=str(model_dir / FACE_FILE)),
-                num_faces=3,
+                num_faces=MAX_FACES,
                 min_face_detection_confidence=0.5,
             )
         )

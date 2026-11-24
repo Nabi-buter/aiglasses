@@ -2,7 +2,8 @@
 """End-to-end smoke test: synthetic data -> train -> predict (Python) -> same in the browser.
 
     python tests/test_pipeline.py            # Python only
-    python tests/test_pipeline.py --browser  # also checks web/pipeline.js gives the same result
+    python tests/test_pipeline.py --browser  # also checks web/pipeline.js gives the same result,
+                                             # and runs the live camera view on a fake webcam
                                              # (needs Node + Playwright with Chromium)
 """
 from __future__ import annotations
@@ -35,15 +36,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--browser", action="store_true")
     ap.add_argument("--n", type=int, default=24)
+    ap.add_argument("--screenshot", help="save the live-view screenshots here (png)")
     args = ap.parse_args()
 
     tmp = Path(tempfile.mkdtemp(prefix="aiglasses-test-", dir=ROOT / "tests"))
     try:
         data, head_path = tmp / "data", tmp / "head.json"
         run([sys.executable, "tests/make_synthetic.py", "--out", data, "--n", str(args.n)])
-        run([sys.executable, "training/train.py", "--data", data, "--out", head_path])
+        run([sys.executable, "training/train.py", "--data", data, "--out", head_path, "--target-recall", "0.95"])
         head = json.loads(head_path.read_text())
         assert head["cv"]["accuracy"] >= 0.9, f"synthetic CV accuracy too low: {head['cv']}"
+        assert head["cv"]["ai_auc"] >= 0.95 and head["cv"]["at_suspect"]["recall"] >= 0.95, head["cv"]
 
         samples = [data / c / f"{c}_{i:03d}.jpg" for c in head["classes"] for i in (0, 1)]
         py = {}
@@ -72,9 +75,35 @@ def main():
             env["NODE_PATH"] = os.pathsep.join(filter(None, [env.get("NODE_PATH"), node_path]))
             out = subprocess.run(["node", "tests/browser_parity.cjs", base, rel(head_path), *map(rel, samples)],
                                  cwd=ROOT, capture_output=True, text=True, env=env, timeout=300)
-            srv.shutdown()
             if out.returncode:
+                srv.shutdown()
                 sys.exit(out.stderr)
+            # Live view: two people side by side on a fake webcam (images the head never saw).
+            held = tmp / "held"
+            run([sys.executable, "tests/make_synthetic.py", "--out", held, "--n", "2", "--seed", "7"])
+            cam = tmp / "cam.y4m"
+            run([sys.executable, "tests/make_fake_camera.py", held / "ai_glasses/ai_glasses_000.jpg",
+                 held / "regular_glasses/regular_glasses_001.jpg", "--out", cam])
+            shot = Path(args.screenshot).resolve() if args.screenshot else tmp / "live.png"
+            live = subprocess.run(["node", "tests/live_e2e.cjs", base, str(head_path), str(cam), str(shot)],
+                                  cwd=ROOT, capture_output=True, text=True, env=env, timeout=300)
+            srv.shutdown()
+            if live.returncode:
+                sys.exit(live.stderr)
+            lr = json.loads(live.stdout)
+            print("live view (left → right):")
+            for t in lr["tracks"]:
+                print(f"  #{t['id']} {t['verdict']:<11} ai={t['probs']['ai_glasses']:.2f} ({t['samples']} frames, face {t['facePx']}px)")
+            verdicts = [t["verdict"] for t in lr["tracks"]]
+            assert len(verdicts) == 2 and lr["ids"] == 2, f"tracking failed: {lr}"
+            assert verdicts[0] in ("AI_GLASSES", "SUSPECTED") and verdicts[1] == "REGULAR", verdicts
+            assert any(l["verdict"] in ("AI_GLASSES", "SUSPECTED") for l in lr["log"]), "red box was not logged"
+            import zipfile
+            with zipfile.ZipFile(lr["zip"]["path"]) as z:
+                assert z.testzip() is None and "labels.csv" in z.namelist()
+                assert sum(n.startswith("ai_glasses/") for n in z.namelist()) >= 2
+            bad = [e for e in lr["errors"] if not e.startswith("INFO:")]
+            assert not bad, bad
             print("browser vs python:")
             for r in json.loads(out.stdout):
                 name = Path(r["file"]).name

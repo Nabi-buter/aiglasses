@@ -2,7 +2,7 @@ name: Test pipeline
 
 on:
   push:
-    paths: ["training/**", "tests/**", "web/pipeline.js", ".github/workflows/test.yml"]
+    paths: ["training/**", "tests/**", "web/**", ".github/workflows/test.yml"]
   pull_request:
 
 jobs:
@@ -24,5 +24,7 @@ jobs:
         run: |
           npm install --no-save playwright@1.49.1
           npx playwright install --with-deps chromium
-      - name: Synthetic train + Python/browser parity
+      - name: Unit tests (tracker, zip)
+        run: node --test tests/tracker.test.mjs
+      - name: Synthetic train + Python/browser parity + live view on a fake webcam
         run: python tests/test_pipeline.py --browser

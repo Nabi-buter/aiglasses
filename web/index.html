@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AI 안경 판독기</title>
-<meta name="description" content="시험 감독관이 응시자의 안경을 촬영하면 기기 안에서 AI 안경 여부를 판독합니다. 사진은 외부로 전송되지 않습니다.">
+<meta name="description" content="시험 감독관이 카메라로 응시자를 비추면 안경마다 박스를 그리고 AI 안경 여부와 확률을 실시간으로 표시합니다. 영상은 기기 안에서만 처리되고 전송되지 않습니다.">
 <meta name="theme-color" content="#1f4e79">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 46 30'%3E%3Crect x='2' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Crect x='27' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Ccircle cx='6' cy='10.5' r='2.5' fill='%23c8323c'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
@@ -23,59 +23,55 @@
       </svg>
       <div>
         <h1>AI 안경 판독기</h1>
-        <p class="sub">시험 감독용 · 사진은 이 기기 안에서만 판독되고 어디에도 전송되지 않습니다</p>
+        <p class="sub">시험 감독용 실시간 판독 · 영상은 이 기기 안에서만 처리되고 어디에도 전송되지 않습니다</p>
       </div>
     </div>
-    <span class="svc"><span class="dot" id="svcDot"></span><span id="svcText">판독 모델 불러오는 중…</span></span>
+    <span class="svc"><span class="dot" id="svcDot"></span><span id="svcText">판독 엔진 불러오는 중…</span></span>
   </header>
 
   <div class="grid">
     <div class="col">
-      <section class="panel" aria-labelledby="h-shoot">
-        <h2 id="h-shoot"><span><span class="step">1</span>촬영</span><span id="camName" style="font-weight:500;letter-spacing:0"></span></h2>
-        <div class="vf" id="vf">
-          <video id="video" playsinline muted autoplay hidden></video>
-          <div class="guide" id="guide" hidden></div>
-          <span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
-          <span class="zoomtag" id="zoomTag" hidden>1.0×</span>
-          <div class="msg" id="vfMsg"><p id="vfMsgText">카메라를 켜는 중입니다…</p></div>
-          <div class="flash" id="flash"></div>
+      <section class="panel stagepanel" aria-label="카메라 화면">
+        <div class="stage" id="stage">
+          <video id="video" playsinline muted autoplay></video>
+          <canvas id="view" aria-label="카메라 화면과 안경 판독 박스"></canvas>
+          <div class="hud">
+            <span class="mode" id="modeTag" hidden><i></i><span id="modeText">실시간</span></span>
+            <span class="perf" id="perfTag" hidden></span>
+          </div>
+          <div class="alert" id="alertBanner" role="alert" hidden></div>
+          <div class="msg" id="stageMsg"><span class="spin"></span><p id="stageMsgText">카메라를 켜는 중입니다…</p></div>
         </div>
 
-        <div class="controls" id="liveControls" hidden>
-          <button class="shutter" id="shutter" aria-label="촬영" title="촬영 (스페이스바)"></button>
-          <label class="zoom" for="zoom">확대
-            <input type="range" id="zoom" min="1" max="3" step="0.1" value="1">
+        <div class="toolbar">
+          <button id="pauseBtn" class="primary" disabled title="화면 멈춤 / 다시 시작 (스페이스바)">멈춤</button>
+          <button id="snapBtn" disabled title="박스가 그려진 화면을 이 기기에 저장 (S)">화면 저장</button>
+          <label class="btn" for="photoIn" title="사진 파일을 같은 방식으로 판독">사진 판독
+            <input type="file" id="photoIn" accept="image/*">
           </label>
-          <button class="small" id="flip" hidden>카메라 전환</button>
+          <button id="liveBtn" class="ghost" hidden>실시간으로 돌아가기</button>
+          <button id="flipBtn" class="ghost" hidden>카메라 전환</button>
+          <button id="retryCam" class="ghost" hidden>카메라 다시 시도</button>
+          <label class="zoom" for="zoom">확대 <span id="zoomVal" class="mono">1.0×</span>
+            <input type="range" id="zoom" min="1" max="4" step="0.1" value="1">
+          </label>
         </div>
 
-        <div class="controls">
-          <label class="btn" for="fileCam">기기 카메라로 촬영
-            <input type="file" id="fileCam" accept="image/*" capture="environment">
-          </label>
-          <label class="btn ghost" for="fileUp">사진 불러오기
-            <input type="file" id="fileUp" accept="image/*" multiple>
-          </label>
-          <button class="ghost small" id="retryCam" hidden>실시간 카메라 다시 시도</button>
-        </div>
+        <ul class="legend" aria-label="박스 색 안내">
+          <li><i class="sw det"></i>파란 박스: 안경 영역을 찾아 판독 중</li>
+          <li><i class="sw ok"></i>초록: 일반 안경</li>
+          <li><i class="sw ai"></i>빨강: AI 안경 · AI 안경 의심</li>
+          <li><i class="sw na"></i>회색: 안경 없음</li>
+          <li><i class="sw far"></i>점선: 너무 멀어서 판독 보류 (확대하거나 다가가세요)</li>
+        </ul>
 
         <div class="fields">
-          <label class="f" for="seat">수험번호 / 좌석
-            <input id="seat" type="text" autocomplete="off" placeholder="예: 12번 좌석">
-          </label>
           <label class="f" for="room">고사실
             <input id="room" type="text" autocomplete="off" placeholder="예: 본관 302">
           </label>
-        </div>
-      </section>
-
-      <section class="panel" aria-labelledby="h-tray">
-        <h2 id="h-tray"><span><span class="step">2</span>촬영함</span><span id="trayCount" style="font-weight:500;letter-spacing:0">0 / 3</span></h2>
-        <div class="tray" id="tray"></div>
-        <p class="hint">얼굴과 안경이 함께 나오게 찍어 주세요. 정면 1장에 측면 1장을 더하면 다리(템플)와 경첩 쪽 카메라가 잘 보입니다.</p>
-        <div class="analyze-row">
-          <button class="primary" id="analyze" disabled>판독하기</button>
+          <label class="f" for="seat">좌석 / 수험번호 <small>(선택한 응시자 기록에 붙습니다)</small>
+            <input id="seat" type="text" autocomplete="off" placeholder="예: 12번 좌석">
+          </label>
         </div>
       </section>
 
@@ -96,15 +92,16 @@
     </div>
 
     <div class="col">
-      <section class="panel" aria-labelledby="h-result" aria-live="polite">
-        <h2 id="h-result"><span><span class="step">3</span>판독 결과</span></h2>
-        <div id="result"></div>
-        <p class="disclaimer">자동 판독은 감독 보조 수단입니다. 오판할 수 있으니 최종 판단은 감독관이 직접 안경을 확인한 뒤 내리세요.</p>
+      <section class="panel" aria-labelledby="h-people">
+        <h2 id="h-people"><span>화면 속 응시자</span><span id="peopleCount" class="mono"></span></h2>
+        <div id="people" class="people"></div>
+        <div id="detail" class="detail" hidden></div>
+        <p class="disclaimer">자동 판독은 감독 보조 수단입니다. 확률은 여러 프레임의 평균이며 틀릴 수 있습니다. 빨간 박스가 뜨면 감독관이 안경을 직접 확인한 뒤 판단하세요.</p>
       </section>
 
       <section class="panel" aria-labelledby="h-log">
         <h2 id="h-log"><span>감독 기록</span>
-          <span style="display:flex;gap:6px">
+          <span class="btns">
             <button class="small ghost" id="exportCsv">CSV 저장</button>
             <button class="small ghost" id="clearLog">비우기</button>
           </span>
@@ -112,15 +109,47 @@
         <div class="counts" id="counts"></div>
         <div id="confirmBox" hidden></div>
         <div class="logwrap"><table class="log">
-          <thead><tr><th>사진</th><th>시각</th><th>좌석</th><th>판정</th><th>AI 확률</th></tr></thead>
+          <thead><tr><th>안경</th><th>시각</th><th>고사실 · 좌석</th><th>판정</th><th>AI 확률</th></tr></thead>
           <tbody id="logBody"></tbody>
         </table></div>
-        <p class="hint">기록은 이 기기의 브라우저에만 남습니다.</p>
+        <p class="hint">빨간 박스(AI 안경·의심)가 안정되면 자동으로 기록됩니다. 다른 응시자는 목록에서 고른 뒤 ‘기록에 남기기’를 누르세요. 기록은 이 기기의 브라우저에만 남습니다.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="h-collect">
+        <details class="check" id="collectBox">
+          <summary id="h-collect">학습 데이터 수집 <span id="collectBadge" class="pill na" hidden></span></summary>
+          <div class="collect">
+            <p class="hint">판독 정확도는 학습 사진에서 나옵니다. 동의를 받은 사람에게 안경을 씌우고 이 화면으로 비추면 얼굴 부분만 잘라 모아 둡니다. ZIP을 받아 <code>data/</code>에 풀고 <code>training/train.py</code>로 다시 학습하세요.</p>
+            <div class="fields">
+              <label class="f" for="cLabel">정답
+                <select id="cLabel">
+                  <option value="ai_glasses">AI 안경</option>
+                  <option value="regular_glasses">일반 안경</option>
+                  <option value="no_glasses">안경 없음</option>
+                </select>
+              </label>
+              <label class="f" for="cSession">사람 / 세션 ID
+                <span class="inl"><input id="cSession" type="text" autocomplete="off" value="p01" maxlength="24"><button class="small ghost" id="cNext" title="다음 사람">다음</button></span>
+              </label>
+              <label class="f" for="cDevice">안경 기종 (선택)
+                <input id="cDevice" type="text" autocomplete="off" placeholder="예: rayban-meta" maxlength="32">
+              </label>
+            </div>
+            <div class="controls">
+              <button id="cAuto" class="primary" disabled>자동 수집 시작</button>
+              <button id="cOne" disabled>지금 1장</button>
+              <button id="cZip" class="ghost" disabled>ZIP 내려받기</button>
+              <button id="cClear" class="ghost small" disabled>비우기</button>
+            </div>
+            <div id="cStats" class="counts"></div>
+            <p class="hint">사람마다 세션 ID를 바꾸세요(‘다음’). 같은 사람의 사진이 학습과 검증에 섞이지 않게 묶는 데 쓰입니다. 정면·45°·측면, 고개 숙인 자세, 1~3m 거리를 골고루 담으세요. 모은 사진은 ZIP으로 받기 전까지 이 탭에만 있습니다.</p>
+          </div>
+        </details>
       </section>
 
       <section class="panel model" aria-labelledby="h-model">
-        <h2 id="h-model"><span>판독 모델</span>
-          <span style="display:flex;gap:6px">
+        <h2 id="h-model"><span>판독 모델 · 설정</span>
+          <span class="btns">
             <label class="btn small ghost" for="headFile">모델 파일 불러오기
               <input type="file" id="headFile" accept=".json,application/json">
             </label>
@@ -128,12 +157,21 @@
           </span>
         </h2>
         <div id="modelInfo"></div>
+        <div class="settings">
+          <label class="tog"><input type="checkbox" id="optHinge"> 판독 영역(양쪽 경첩) 박스 보기</label>
+          <label class="tog"><input type="checkbox" id="optNoGlasses" checked> ‘안경 없음’ 얼굴에도 회색 박스 표시</label>
+          <label class="tog"><input type="checkbox" id="optSound"> AI 안경 의심 시 진동·경고음</label>
+          <label class="tog"><input type="checkbox" id="optPerf"> 처리 속도 표시</label>
+          <label class="f" for="optMinFace">판독할 최소 얼굴 너비 <span id="optMinFaceVal" class="mono"></span>
+            <input type="range" id="optMinFace" min="48" max="200" step="4" value="88">
+          </label>
+        </div>
       </section>
     </div>
   </div>
 
   <footer class="foot">
-    <span>MediaPipe Face Landmarker + MobileNetV3 임베더 + 학습된 분류기 · 모두 브라우저에서 실행</span>
+    <span>MediaPipe Face Landmarker + MobileNetV3 임베더 + 직접 학습한 분류기 · 모두 브라우저에서 실행</span>
     <a href="https://github.com/" id="repoLink" rel="noopener">소스 코드 · 모델 학습 방법</a>
   </footer>
 </div>

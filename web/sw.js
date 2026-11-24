@@ -1,10 +1,10 @@
 // Offline support: once the page has been opened, it keeps working without a network
 // (useful in exam halls). Large model/runtime files are cache-first; small app files
 // and head.json are network-first so a redeploy is picked up on the next load.
-const CACHE = "ai-glasses-v1";
+const CACHE = "ai-glasses-v2";
 const BIG = /\/(models\/.+\.(task|tflite)|vendor\/.+\.(wasm|mjs)|vendor\/wasm\/.+\.js)$/;
 const PRECACHE = [
-  "./", "index.html", "styles.css", "app.js", "pipeline.js", "manifest.webmanifest",
+  "./", "index.html", "styles.css", "app.js", "pipeline.js", "tracker.js", "zip.js", "manifest.webmanifest",
   "vendor/vision_bundle.mjs", "vendor/wasm/vision_wasm_internal.js", "vendor/wasm/vision_wasm_internal.wasm",
   "models/face_landmarker.task", "models/mobilenet_v3_large.tflite", "icon.svg",
 ];

@@ -107,43 +107,87 @@ export async function blobToCanvas(blob) {
   return c;
 }
 
+export const MAX_FACES = 8;   // == glasses_features.MAX_FACES
+
+/** Face bounding box (pixels) from landmarks, for size gating and data collection. */
+export function faceRect(lm, w, h) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of lm) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  return { x0: x0 * w, y0: y0 * h, x1: x1 * w, y1: y1 * h };
+}
+
+/** Face width in pixels (same measure the crop geometry is based on). */
+export const facePx = (lm, w) => faceWidth(lm) * w;
+
 export class Detector {
-  static async create(base = ".") {
+  /**
+   * Two Face Landmarker instances: IMAGE mode for still photos (identical to the
+   * Python side) and VIDEO mode for the live camera (tracks faces between frames,
+   * which is much faster). The embedder is shared.
+   */
+  static async create(base = ".", { video = true } = {}) {
     const fileset = await FilesetResolver.forVisionTasks(`${base}/vendor/wasm`);
-    const face = await FaceLandmarker.createFromOptions(fileset, {
+    const faceOpts = (mode) => ({
       baseOptions: { modelAssetPath: `${base}/models/face_landmarker.task`, delegate: "CPU" },
-      runningMode: "IMAGE", numFaces: 3, minFaceDetectionConfidence: 0.5,
+      runningMode: mode, numFaces: MAX_FACES, minFaceDetectionConfidence: 0.5,
+      minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
     });
+    const face = await FaceLandmarker.createFromOptions(fileset, faceOpts("IMAGE"));
+    const faceVideo = video ? await FaceLandmarker.createFromOptions(fileset, faceOpts("VIDEO")) : null;
     const embedder = await ImageEmbedder.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: `${base}/models/mobilenet_v3_large.tflite`, delegate: "CPU" },
       runningMode: "IMAGE", l2Normalize: true, quantize: false,
     });
-    return new Detector(face, embedder);
+    return new Detector(face, faceVideo, embedder);
   }
 
-  constructor(face, embedder) { this.face = face; this.embedder = embedder; }
+  constructor(face, faceVideo, embedder) {
+    this.face = face; this.faceVideo = faceVideo; this.embedder = embedder; this.lastTs = 0;
+  }
 
   embed(canvas) {
     return Float32Array.from(this.embedder.embed(canvas).embeddings[0].floatEmbedding);
   }
 
-  /** canvas -> {feature, boxes, crops, reason} ; feature is null when no face. */
-  extract(canvas) {
-    const res = this.face.detect(canvas);
-    if (!res.faceLandmarks?.length) return { feature: null, boxes: null, crops: null, reason: "no_face" };
-    const lm = res.faceLandmarks.reduce((a, b) => (faceWidth(b) > faceWidth(a) ? b : a));
-    const boxes = cropBoxes(lm, canvas.width, canvas.height);
-    if (boxes.band.empty) return { feature: null, boxes, crops: null, reason: "crop_empty" };
+  /** All faces in a still image: [{lm, boxes, facePx}] sorted largest first. */
+  facesInImage(canvas) {
+    return this._faces(this.face.detect(canvas), canvas.width, canvas.height);
+  }
 
+  /** All faces in a live frame. `canvas` holds the current frame; ts in ms. */
+  facesInFrame(canvas, ts) {
+    const t = Math.max(Math.round(ts), this.lastTs + 1);   // VIDEO mode needs strictly increasing timestamps
+    this.lastTs = t;
+    return this._faces(this.faceVideo.detectForVideo(canvas, t), canvas.width, canvas.height);
+  }
+
+  _faces(res, w, h) {
+    return (res.faceLandmarks || [])
+      .map((lm) => ({ lm, boxes: cropBoxes(lm, w, h), facePx: facePx(lm, w), rect: faceRect(lm, w, h) }))
+      .sort((a, b) => b.facePx - a.facePx);
+  }
+
+  /** Feature vector for one face, given its crop boxes. -> {feature, crops} or null */
+  featureFor(canvas, boxes) {
+    if (boxes.band.empty) return null;
     const crops = {};
     for (const k of ["band", "hinge_l", "hinge_r"]) if (!boxes[k].empty) crops[k] = cropCanvas(canvas, boxes[k]);
     const band = this.embed(crops.band);
     const hinges = ["hinge_l", "hinge_r"].filter((k) => crops[k]).map((k) => this.embed(crops[k]));
     const hinge = new Float32Array(EMBED_DIM);
     for (const h of hinges) for (let i = 0; i < EMBED_DIM; i++) hinge[i] += h[i] / hinges.length;
-
     const feature = new Float32Array(FEATURE_DIM);
     feature.set(band, 0); feature.set(hinge, EMBED_DIM);
-    return { feature, boxes, crops, reason: "" };
+    return { feature, crops };
+  }
+
+  /** Largest face only (== glasses_features.FeatureExtractor.extract). */
+  extract(canvas) {
+    const faces = this.facesInImage(canvas);
+    if (!faces.length) return { feature: null, boxes: null, crops: null, reason: "no_face" };
+    const { boxes } = faces[0];
+    const r = this.featureFor(canvas, boxes);
+    if (!r) return { feature: null, boxes, crops: null, reason: "crop_empty" };
+    return { feature: r.feature, boxes, crops: r.crops, reason: "" };
   }
 }

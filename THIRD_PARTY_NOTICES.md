@@ -16,3 +16,7 @@ https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder
 ## Test image
 `tests/make_synthetic.py` uses `skimage.data.astronaut()` (NASA photograph of Eileen Collins, public domain),
 which ships with scikit-image. No image is stored in this repository.
+
+## docs/live_view.jpg
+
+The README screenshot shows the astronaut photo bundled with scikit-image (Eileen Collins, NASA, public domain) with cartoon glasses drawn on by `tests/make_synthetic.py`.
