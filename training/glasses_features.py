@@ -192,6 +192,26 @@ class FeatureExtractor:
         hinge = np.mean(hinges, axis=0) if hinges else np.zeros(EMBED_DIM, np.float32)
         return Extraction(np.concatenate([band, hinge]).astype(np.float32), boxes)
 
+    def extract_faces(self, rgb: np.ndarray) -> list[dict]:
+        """Every face in the image (== web/pipeline.js facesInImage + featureFor):
+        [{"rect": (x0, y0, x1, y1) normalised, "face_px": float, "boxes": {...}, "feature": array | None}]"""
+        h, w = rgb.shape[:2]
+        img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
+        out = []
+        for lm in self._face.detect(img).face_landmarks:
+            xs, ys = [p.x for p in lm], [p.y for p in lm]
+            boxes = crop_boxes(lm, w, h)
+            feat = None
+            if not boxes["band"].empty:
+                crop = lambda b: rgb[b.y0:b.y1, b.x0:b.x1]  # noqa: E731
+                band = self._embed(crop(boxes["band"]))
+                hinges = [self._embed(crop(boxes[k])) for k in ("hinge_l", "hinge_r") if not boxes[k].empty]
+                hinge = np.mean(hinges, axis=0) if hinges else np.zeros(EMBED_DIM, np.float32)
+                feat = np.concatenate([band, hinge]).astype(np.float32)
+            out.append({"rect": (min(xs), min(ys), max(xs), max(ys)), "face_px": face_width(lm) * w,
+                        "boxes": boxes, "feature": feat})
+        return out
+
     def extract_path(self, path: str | Path, flip: bool = False) -> Extraction:
         rgb = load_rgb(path)
         if flip:

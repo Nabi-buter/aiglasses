@@ -191,3 +191,50 @@ export class Detector {
     return { feature: r.feature, boxes, crops: r.crops, reason: "" };
   }
 }
+
+/* ---------------- built-in glasses / no-glasses model (models/presence.json) ---------------- */
+// Trained by training/build_presence.py on public data, so the app can tell glasses from no glasses
+// before you have trained your own head.json (which tells AI glasses from regular glasses).
+export const GLASSES_KEY = "__glasses";
+
+export function validatePresence(p) {
+  if (!p || p.format !== "ai-glasses-presence/v1") throw new Error("presence.json 형식이 아닙니다.");
+  if (p.crop !== CROP_VERSION) throw new Error(`presence.json crop 버전이 다릅니다 (${p.crop}).`);
+  if (p.W?.length !== 2 || p.W.some((r) => r.length !== FEATURE_DIM)) throw new Error("presence.json 크기가 맞지 않습니다.");
+  return p;
+}
+
+/** One frame's scores: head class probabilities (if a head) + P(glasses) under GLASSES_KEY (if presence). */
+export function scoreFace(head, presence, feature) {
+  const out = head ? predict(head, feature) : {};
+  if (presence) out[GLASSES_KEY] = predict(presence, feature).glasses;
+  return out;
+}
+
+/**
+ * Verdict from (averaged) scores.
+ *  - no head: GLASSES / NO_GLASSES from the presence model
+ *  - head trained with no_glasses: the head decides (it saw your data)
+ *  - head without no_glasses: the presence model can turn REGULAR into NO_GLASSES,
+ *    but never hides a red verdict (missing AI glasses is the worse mistake)
+ */
+export function decide(head, presence, p) {
+  if (!p) return null;
+  const pG = p[GLASSES_KEY];
+  const hasG = presence && pG != null, isG = hasG && pG >= (presence.threshold ?? 0.5);
+  if (!head) return hasG ? (isG ? "GLASSES" : "NO_GLASSES") : null;
+  const v = verdictFor(head, Object.fromEntries(head.classes.map((c) => [c, p[c] ?? 0])));
+  if (head.classes.includes("no_glasses") || !hasG || isG) return v;
+  return v === "AI_GLASSES" || v === "SUSPECTED" ? v : "NO_GLASSES";
+}
+
+/** The probability shown next to a verdict. */
+export function shownProb(head, verdict, p) {
+  if (!p) return null;
+  switch (verdict) {
+    case "GLASSES": return p[GLASSES_KEY];
+    case "NO_GLASSES": return head?.classes.includes("no_glasses") ? p.no_glasses : 1 - (p[GLASSES_KEY] ?? 0);
+    case "REGULAR": return p.regular_glasses;
+    default: return head ? p[head.ai_class] : null;
+  }
+}

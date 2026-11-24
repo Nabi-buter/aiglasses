@@ -1,5 +1,6 @@
 // End-to-end test of the live view with a fake webcam.
-// node tests/live_e2e.cjs <baseUrl> <head.json path> <cam.y4m> [screenshot.png]
+// node tests/live_e2e.cjs <baseUrl> <head.json path | "none"> <cam.y4m> [screenshot.png]
+// With "none" there is no trained head: only the built-in glasses/no-glasses model runs.
 // Prints JSON: the tracked faces (left to right) with verdicts, and checks on the UI.
 const fs = require("fs");
 const { chromium } = require("playwright");
@@ -14,15 +15,16 @@ const { chromium } = require("playwright");
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  await page.route("**/models/head.json", (r) => r.fulfill({ path: headPath, contentType: "application/json" }));
+  const noHead = headPath === "none";
+  await page.route("**/models/head.json", (r) => (noHead ? r.fulfill({ status: 404, body: "" }) : r.fulfill({ path: headPath, contentType: "application/json" })));
   await page.goto(`${base}/web/index.html`);
 
   // Wait until both people have a stable, averaged verdict.
-  await page.waitForFunction(() => {
+  await page.waitForFunction((noHead) => {
     const s = window.__aig;
     const t = s?.tracker?.tracks?.filter((x) => x.visible) || [];
-    return s.head && t.length >= 2 && t.every((x) => x.stable && x.samples.length >= 4);
-  }, null, { timeout: 90000, polling: 250 });
+    return (noHead ? s.presence && !s.head : s.head) && t.length >= 2 && t.every((x) => x.stable && x.samples.length >= 4);
+  }, noHead, { timeout: 90000, polling: 250 });
   await page.waitForTimeout(600);
 
   const result = await page.evaluate(() => {
@@ -33,6 +35,7 @@ const { chromium } = require("playwright");
       ids: s.tracker.nextId - 1,
       log: s.log.map((l) => ({ verdict: l.verdict, pAi: l.pAi, src: l.src })),
       people: [...document.querySelectorAll("#people .person")].map((b) => b.textContent),
+      noModelTag: document.getElementById("noModelTag").hidden ? null : document.getElementById("noModelTag").textContent,
       perf: s.perf,
     };
   });

@@ -105,6 +105,21 @@ def main():
             bad = [e for e in lr["errors"] if not e.startswith("INFO:")]
             assert not bad, bad
 
+            # Before any training: only the built-in presence model -> blue (glasses) / grey (none).
+            cam2 = tmp / "cam_nohead.y4m"
+            run([sys.executable, "tests/make_fake_camera.py", held / "regular_glasses/regular_glasses_000.jpg",
+                 held / "no_glasses/no_glasses_001.jpg", "--out", cam2])
+            nh = subprocess.run(["node", "tests/live_e2e.cjs", base, "none", str(cam2), str(shot).replace(".png", "_nohead.png")],
+                                cwd=ROOT, capture_output=True, text=True, env=env, timeout=300)
+            if nh.returncode:
+                srv.shutdown()
+                sys.exit(nh.stderr)
+            nr = json.loads(nh.stdout)
+            print("live view without a trained head (left → right):",
+                  [(t["verdict"], round(t["probs"]["__glasses"], 2)) for t in nr["tracks"]])
+            assert [t["verdict"] for t in nr["tracks"]] == ["GLASSES", "NO_GLASSES"], nr["tracks"]
+            assert nr["noModelTag"] and not nr["log"], nr
+
             # In-browser training page: same dataset as a (deflate) ZIP -> head.json in the browser.
             zpath = tmp / "dataset.zip"
             with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:

@@ -1,4 +1,4 @@
-import { Detector, blobToCanvas, predict, verdictFor, validateHead } from "./pipeline.js";
+import { Detector, blobToCanvas, validateHead, validatePresence, scoreFace, decide, shownProb, GLASSES_KEY } from "./pipeline.js";
 import { Tracker } from "./tracker.js";
 import { makeZip } from "./zip.js";
 
@@ -19,13 +19,15 @@ const VERDICTS = {
     steps: ["가까이 가거나 확대해서 측면이 보이게 비춰 보세요. 여러 프레임이 쌓이면 판정이 안정됩니다.", "경첩 부근 카메라 렌즈, LED, 두꺼운 다리를 육안으로 확인하세요.", "의심이 남으면 안경을 벗어 확인하세요."] },
   REGULAR: { cls: "ok", label: "일반 안경", color: COLOR.ok, prob: "regular_glasses", steps: [] },
   NO_GLASSES: { cls: "na", label: "안경 없음", color: COLOR.na, prob: "no_glasses", steps: [] },
+  GLASSES: { cls: "det", label: "안경 착용", color: COLOR.det, prob: GLASSES_KEY,
+    steps: ["AI 안경인지 일반 안경인지는 판독 모델(head.json)을 학습해야 표시됩니다. 위 ‘모델 학습’을 보세요.", "그 전까지는 육안 확인 포인트를 참고해 직접 확인하세요."] },
 };
 const isFlag = (v) => v === "AI_GLASSES" || v === "SUSPECTED";
 
 const DEFAULT_OPTS = { hinge: false, noGlasses: true, sound: false, perf: false, minFace: 88 };
 
 const state = {
-  detector: null, head: null, headSource: "",
+  detector: null, head: null, headSource: "", presence: null,
   stream: null, facing: "environment", zoom: 1, hwZoom: null,
   mode: "live", paused: false, work: document.createElement("canvas"), lastVideoTime: -1,
   tracker: new Tracker(), photo: null, selectedId: null,
@@ -63,7 +65,7 @@ function download(blob, name) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
-function setSvc(kind, text) { $("svcDot").className = "dot " + (kind === "ok" ? "on" : kind === "bad" ? "off" : ""); $("svcText").textContent = text; }
+function setSvc(kind, text) { $("svcDot").className = "dot " + (kind === "ok" ? "on" : kind === "bad" ? "off" : kind === "warn" ? "warn" : ""); $("svcText").textContent = text; }
 function stageMsg(text, spin = false) {
   $("stageMsg").hidden = !text; $("stageMsgText").textContent = text || "";
   $("stageMsg").querySelector(".spin").hidden = !spin;
@@ -79,6 +81,10 @@ async function loadModels() {
     stageMsg("판독 엔진을 불러오지 못했습니다. 최신 Chrome·Edge·Safari에서 열어 주세요. 파일을 직접 열었다면 웹 서버(예: GitHub Pages)로 열어야 합니다.");
     return;
   }
+  try {
+    const r = await fetch("models/presence.json", { cache: "no-cache" });
+    if (r.ok) state.presence = validatePresence(await r.json());
+  } catch (e) { console.warn("presence.json:", e); }
   const custom = read(HEAD_KEY);
   if (custom) {
     try { useHead(validateHead(JSON.parse(custom)), "custom"); } catch { store(HEAD_KEY, null); }
@@ -98,7 +104,10 @@ function useHead(head, source) {
   state.head = head; state.headSource = source;
   for (const t of state.tracker.tracks) { t.samples = []; t.probs = null; t.verdict = null; t.stable = false; t.lastClassified = -Infinity; t.flagged = false; }
   if (head) setSvc("ok", "판독 준비 완료 · 기기 안에서 실행");
+  else if (state.presence) setSvc("warn", "AI 안경 판독 모델 없음 · 안경 유무만 판독");
   else setSvc("bad", "학습된 판독 모델이 없습니다 · 안경 영역만 표시");
+  $("noModelTag").hidden = !!head;
+  $("noModelTag").textContent = state.presence ? "AI 안경 판독 모델 없음 · 안경 착용 여부만 표시" : "판독 모델 없음 · 얼굴의 안경 위치만 표시";
   $("resetHead").hidden = source !== "custom";
   renderModelInfo();
   if (state.mode === "photo" && state.photo) analyzePhoto(state.photo.canvas);
@@ -107,10 +116,18 @@ function useHead(head, source) {
 
 function renderModelInfo() {
   const box = $("modelInfo"); box.replaceChildren();
-  const h = state.head;
+  const h = state.head, pr = state.presence;
+  if (pr) {
+    const d = el("dl");
+    d.append(el("dt", null, "안경 착용 판독"), el("dd", null,
+      `기본 포함 · 공개 사진 ${pr.cv.n.toLocaleString()}명 얼굴로 학습 · 정확도 ${pct(pr.cv.accuracy)} (안경 ${pct(pr.cv.glasses_recall)} · 안경 없음 ${pct(pr.cv.no_glasses_recall)})`));
+    box.append(d);
+  }
   if (!h) {
     const s = el("div", "setup");
-    s.append(el("p", null, "아직 학습된 모델(head.json)이 없습니다. 화면에 안경 영역 박스는 그려지지만 AI 안경 여부와 확률은 나오지 않습니다."));
+    s.append(el("p", null, pr
+      ? "AI 안경 판독 모델(head.json)이 아직 없습니다. 지금은 안경을 썼는지(파란 박스)·안 썼는지(회색 박스)만 판독합니다. AI 안경(빨강)과 일반 안경(초록)을 구분하려면 AI 안경 사진으로 모델을 학습해야 합니다."
+      : "아직 학습된 모델이 없습니다. 화면의 박스는 얼굴에서 안경이 있을 위치일 뿐, 안경 착용 여부와 종류는 판독하지 않습니다."));
     const a = el("a", "btn primary", "모델 학습 페이지 열기"); a.href = "train.html";
     s.append(el("p", null, "아래 ‘학습 데이터 수집’으로 사진을 모은 뒤, 모델 학습 페이지에 ZIP을 넣으면 이 브라우저에서 바로 학습됩니다."), a);
     box.append(s);
@@ -197,7 +214,7 @@ function process(now) {
   try { faces = state.detector.facesInFrame(state.work, now); } catch (e) { console.error(e); }
   const t1 = performance.now();
   const tracks = state.tracker.update(faces, now);
-  if (state.head) {
+  if (state.head || state.presence) {
     const t = state.tracker.next(now, (x) => x.facePx >= state.opts.minFace);
     if (t) classifyTrack(t, state.work, now);
   }
@@ -218,11 +235,11 @@ function process(now) {
 function classifyTrack(t, canvas, now) {
   const r = state.detector.featureFor(canvas, t.boxes);
   if (!r) return;
-  const probs = predict(state.head, r.feature);
+  const probs = scoreFace(state.head, state.presence, r.feature);
   state.tracker.addSample(t, probs, now);
   t.crops = r.crops; t.cropAt = now;
-  t.verdict = verdictFor(state.head, t.probs);
-  if (t.stable) t.maxAi = Math.max(t.maxAi || 0, t.probs[state.head.ai_class] ?? 0);
+  t.verdict = decide(state.head, state.presence, t.probs);
+  if (t.stable && state.head) t.maxAi = Math.max(t.maxAi || 0, t.probs[state.head.ai_class] ?? 0);
   if (t.stable && isFlag(t.verdict) && !t.flagged) { t.flagged = true; onFlag(t); }
 }
 
@@ -263,11 +280,11 @@ function currentTracks() {
 function sourceCanvas() { return state.mode === "photo" ? state.photo?.canvas : state.work; }
 
 function styleFor(t, minFace) {
-  const h = state.head, far = t.facePx < minFace;
-  if (!h) return { color: COLOR.det, text: "안경 영역", dashed: far };
-  if (!t.probs) return far ? { color: COLOR.det, text: "멀어요 · 확대하세요", dashed: true } : { color: COLOR.det, text: "안경 인식 · 판독 중" };
+  const far = t.facePx < minFace;
+  if (!state.head && !state.presence) return { color: COLOR.det, text: "안경 위치", dashed: far };
+  if (!t.probs || !t.verdict) return far ? { color: COLOR.det, text: "멀어요 · 확대하세요", dashed: true } : { color: COLOR.det, text: "안경 인식 · 판독 중" };
   const meta = VERDICTS[t.verdict] || VERDICTS.SUSPECTED;
-  return { color: meta.color, text: `${meta.label} ${pct(t.probs[meta.prob] ?? 0)}`, dashed: far, faint: !t.stable, hide: t.verdict === "NO_GLASSES" && !state.opts.noGlasses, na: t.verdict === "NO_GLASSES" };
+  return { color: meta.color, text: `${meta.label} ${pct(shownProb(state.head, t.verdict, t.probs) ?? 0)}`, dashed: far, faint: !t.stable, hide: t.verdict === "NO_GLASSES" && !state.opts.noGlasses, na: t.verdict === "NO_GLASSES" };
 }
 
 /** Draw the frame and the boxes. W×H is the output size in drawing units; scale maps frame px -> units. */
@@ -364,10 +381,10 @@ function hitTest(ev) {
 
 /* ---------------- side list ---------------- */
 function trackSummary(t) {
-  if (!state.head) return { cls: "det", label: "안경 영역", p: null };
-  if (!t.probs) return { cls: "det", label: t.facePx < state.opts.minFace && state.mode === "live" ? "멀어서 보류" : "판독 중", p: null };
+  if (!state.head && !state.presence) return { cls: "det", label: "안경 위치 (모델 없음)", p: null };
+  if (!t.probs || !t.verdict) return { cls: "det", label: t.facePx < state.opts.minFace && state.mode === "live" ? "멀어서 보류" : "판독 중", p: null };
   const meta = VERDICTS[t.verdict];
-  return { cls: meta.cls, label: meta.label, p: t.probs[meta.prob] };
+  return { cls: meta.cls, label: meta.label, p: shownProb(state.head, t.verdict, t.probs) };
 }
 
 function renderPeople() {
@@ -413,10 +430,14 @@ function renderDetail(t) {
   }
   if (t.probs) {
     const wrap = el("div", "probs");
-    for (const c of [...state.head.classes].sort((a, b) => (a === state.head.ai_class ? -1 : b === state.head.ai_class ? 1 : a.localeCompare(b)))) {
-      const row = el("div", "prow " + (c === state.head.ai_class ? "ai" : c === "regular_glasses" ? "reg" : "na"));
-      const bar = el("div", "pb"), fill = el("i"); fill.style.width = pct(t.probs[c]); bar.append(fill);
-      row.append(el("span", null, CLASS_NAMES[c] || c), bar, el("span", "pv", pct(t.probs[c])));
+    const bars = [];
+    if (state.presence && t.probs[GLASSES_KEY] != null) bars.push(["안경 착용 (기본 모델)", t.probs[GLASSES_KEY], "det"]);
+    if (state.head) for (const c of [...state.head.classes].sort((a, b) => (a === state.head.ai_class ? -1 : b === state.head.ai_class ? 1 : a.localeCompare(b))))
+      bars.push([CLASS_NAMES[c] || c, t.probs[c], c === state.head.ai_class ? "ai" : c === "regular_glasses" ? "reg" : "na"]);
+    for (const [name, v, cls] of bars) {
+      const row = el("div", "prow " + cls);
+      const bar = el("div", "pb"), fill = el("i"); fill.style.width = pct(v); bar.append(fill);
+      row.append(el("span", null, name), bar, el("span", "pv", pct(v)));
       wrap.append(row);
     }
     box.append(wrap);
@@ -426,7 +447,7 @@ function renderDetail(t) {
   }
   const act = el("div", "controls");
   const logBtn = el("button", "small", "기록에 남기기");
-  logBtn.disabled = !t.probs;
+  logBtn.disabled = !t.probs || !state.head;
   logBtn.onclick = () => { addLog(t, state.mode, "manual"); logBtn.textContent = "기록했습니다"; logBtn.disabled = true; };
   act.append(logBtn);
   box.append(act);
@@ -461,11 +482,12 @@ function analyzePhoto(canvas, log = false) {
   const faces = state.detector.facesInImage(canvas);
   const tracks = faces.map((f, i) => ({ id: i + 1, box: f.boxes.band, boxes: f.boxes, facePx: f.facePx, rect: f.rect, samples: [], visible: true }));
   for (const t of tracks) {
-    if (!state.head || t.facePx < PHOTO_MIN_FACE) continue;
+    if (!(state.head || state.presence) || t.facePx < PHOTO_MIN_FACE) continue;
     const r = state.detector.featureFor(canvas, t.boxes);
     if (!r) continue;
-    t.probs = predict(state.head, r.feature); t.verdict = verdictFor(state.head, t.probs); t.stable = true; t.crops = r.crops;
-    if (log) addLog(t, "photo", "auto");
+    t.probs = scoreFace(state.head, state.presence, r.feature); t.verdict = decide(state.head, state.presence, t.probs);
+    t.stable = true; t.crops = r.crops;
+    if (log && state.head && t.verdict !== "NO_GLASSES") addLog(t, "photo", "auto");
   }
   state.photo.tracks = tracks;
   state.selectedId = tracks.find((t) => isFlag(t.verdict))?.id ?? (tracks.length === 1 ? 1 : null);

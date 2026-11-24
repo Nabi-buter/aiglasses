@@ -20,3 +20,8 @@ which ships with scikit-image. No image is stored in this repository.
 ## docs/live_view.jpg
 
 The README screenshot shows the astronaut photo bundled with scikit-image (Eileen Collins, NASA, public domain) with cartoon glasses drawn on by `tests/make_synthetic.py`.
+
+## web/models/presence.json
+
+Weights learned by `training/build_presence.py` from Open Images V7 (https://storage.googleapis.com/openimages/web/index.html).
+Annotations © Google LLC, licensed under CC BY 4.0. Images are listed as having a CC BY 2.0 license; no images are redistributed here, only model weights.
