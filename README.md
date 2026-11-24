@@ -87,14 +87,11 @@ python3 -m http.server 8000
 
 ## GitHub Pages 배포
 
-1. 이 저장소를 GitHub에 올립니다.
-2. **Settings → Pages → Build and deployment → Source** 를 **GitHub Actions** 로 바꿉니다.
-3. `main` 브랜치에 push하면 `.github/workflows/pages.yml`이 `web/` 폴더를 배포합니다.
-   주소는 `https://<사용자>.github.io/<저장소>/` 입니다.
-
-학습한 `head.json`을 `web/models/`에 넣고 push하면 모든 감독관이 같은 모델을 씁니다.
-모델을 공개하고 싶지 않다면 배포에는 빼고, 각 기기에서 **판독 모델 → 모델 파일 불러오기**로 넣어도 됩니다.
-불러온 모델은 그 브라우저에만 저장됩니다.
+`.github/workflows/pages.yml`이 저장소의 **기본 브랜치**에 `web/` 변경이 올라올 때마다 `web/` 폴더를 GitHub Pages로 배포합니다.
+주소는 `https://<사용자>.github.io/<저장소>/` 입니다.
+- 처음 한 번은 **Settings → Pages → Build and deployment → Source** 를 **GitHub Actions** 로 바꿔야 할 수 있습니다.
+- 바꾼 뒤 **Actions → Deploy web app to GitHub Pages → Run workflow** 로 다시 실행하세요.
+- 카메라는 `https://`에서만 켜지는데, GitHub Pages는 기본이 https입니다.
 
 ## 데이터와 모델은 어디에 두나
 
@@ -106,7 +103,7 @@ python3 -m http.server 8000
 ### 모든 감독관 기기에 모델 배포
 
 1. 모델 학습 페이지에서 **head.json 내려받기**
-2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (main 브랜치)
+2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (기본 브랜치 그대로)
 3. 1~2분 뒤 GitHub Actions가 자동으로 다시 배포합니다. 감독관은 웹 주소를 새로 고치면 됩니다.
 
 ## 모델 학습
