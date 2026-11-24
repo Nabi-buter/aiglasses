@@ -1,7 +1,8 @@
 name: Deploy web app to GitHub Pages
 
-# Deploys web/ whenever the repository's default branch changes
-# (for example after uploading a new web/models/head.json through the GitHub website).
+# Deploys web/ whenever main (or the repository's default branch) changes,
+# for example after uploading a new web/models/head.json through the GitHub website.
+# The github-pages environment only accepts deployments from main.
 on:
   push:
     paths: ["web/**", ".github/workflows/pages.yml"]
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.ref_name == 'main' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -87,7 +87,7 @@ python3 -m http.server 8000
 
 ## GitHub Pages 배포
 
-`.github/workflows/pages.yml`이 저장소의 **기본 브랜치**에 `web/` 변경이 올라올 때마다 `web/` 폴더를 GitHub Pages로 배포합니다.
+`.github/workflows/pages.yml`이 **main 브랜치**에 `web/` 변경이 올라올 때마다 `web/` 폴더를 GitHub Pages로 배포합니다.
 주소는 `https://<사용자>.github.io/<저장소>/` 입니다.
 - 처음 한 번은 **Settings → Pages → Build and deployment → Source** 를 **GitHub Actions** 로 바꿔야 할 수 있습니다.
 - 바꾼 뒤 **Actions → Deploy web app to GitHub Pages → Run workflow** 로 다시 실행하세요.
@@ -103,7 +103,7 @@ python3 -m http.server 8000
 ### 모든 감독관 기기에 모델 배포
 
 1. 모델 학습 페이지에서 **head.json 내려받기**
-2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (기본 브랜치 그대로)
+2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (main 브랜치)
 3. 1~2분 뒤 GitHub Actions가 자동으로 다시 배포합니다. 감독관은 웹 주소를 새로 고치면 됩니다.
 
 ## 모델 학습
