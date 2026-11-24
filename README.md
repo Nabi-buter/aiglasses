@@ -65,16 +65,11 @@
 2. **판정이 틀렸을 때**는 그 사람을 골라 ‘판정이 틀렸나요?’에서 실제 정답을 누릅니다.
    - 모델이 틀린 장면이 학습 데이터에 담깁니다.
    - 이런 어려운 사례가 정확도를 가장 크게 올립니다.
-3. **ZIP 내려받기**를 누릅니다.
-   - ZIP 안은 `ai_glasses/…jpg`, `regular_glasses/…jpg` 구조이고 `labels.csv`가 들어 있습니다.
-   - 저장소의 `data/`에 풀고 다시 학습합니다.
-
-   ```bash
-   unzip -o aiglasses_dataset_*.zip -d data
-   python training/train.py --data data --out web/models/head.json --target-recall 0.95
-   ```
-
-4. 새 `head.json`을 배포합니다. 또는 각 기기에서 **모델 파일 불러오기**로 넣습니다.
+3. **ZIP 내려받기**를 누릅니다. ZIP 안은 `ai_glasses/…jpg`, `regular_glasses/…jpg` 구조이고 `labels.csv`가 들어 있습니다.
+4. 화면 위 **모델 학습**(`train.html`)을 열고 지금까지 모은 ZIP을 모두 끌어다 놓은 뒤 **학습 시작**을 누릅니다.
+   - Python 설치 없이 브라우저 안에서 학습합니다. 사진은 기기 밖으로 나가지 않습니다.
+   - 결과로 AI 안경 탐지율, 일반 안경 오탐률, 기준별 표, **틀린 사진 목록**이 나옵니다.
+5. **이 기기에서 바로 사용**을 누르거나, **head.json 내려받기** 후 저장소에 올려 모든 기기에 배포합니다([아래](#모든-감독관-기기에-모델-배포)).
 
 > “강화학습”처럼 현장에서 스스로 좋아지는 효과는 이 **수집 → 정정 → 재학습** 순환으로 얻습니다.
 > 안경 분류처럼 정답이 분명한 문제는 지도학습이 더 정확하고 안정적입니다.
@@ -101,7 +96,27 @@ python3 -m http.server 8000
 모델을 공개하고 싶지 않다면 배포에는 빼고, 각 기기에서 **판독 모델 → 모델 파일 불러오기**로 넣어도 됩니다.
 불러온 모델은 그 브라우저에만 저장됩니다.
 
+## 데이터와 모델은 어디에 두나
+
+| 무엇 | 어디에 | 이유 |
+| --- | --- | --- |
+| 학습 사진 (얼굴 포함) | **감독관 PC에 ZIP으로 보관**, 웹의 모델 학습 페이지에 넣어 학습 | 개인정보입니다. 저장소(GitHub)에 올리지 않습니다 |
+| 학습된 모델 `head.json` (숫자만) | **저장소 `web/models/head.json`** | 올리면 웹 주소로 접속하는 모든 기기가 자동으로 같은 모델을 씁니다 |
+
+### 모든 감독관 기기에 모델 배포
+
+1. 모델 학습 페이지에서 **head.json 내려받기**
+2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (main 브랜치)
+3. 1~2분 뒤 GitHub Actions가 자동으로 다시 배포합니다. 감독관은 웹 주소를 새로 고치면 됩니다.
+
 ## 모델 학습
+
+**웹에서 학습하기(권장):** 앱의 **모델 학습** 페이지(`train.html`)에 ZIP이나 `data` 폴더를 넣고 **학습 시작**을 누릅니다.
+- 아래 Python 학습과 같은 특징, 같은 모델(scikit-learn과 같은 목적함수), 같은 교차검증 보고서를 냅니다.
+- `tests/logreg_parity.py`와 `tests/train_e2e.cjs`로 같은 결과가 나오는지 확인합니다.
+- 한 번 처리한 사진의 특징값은 브라우저(IndexedDB)에 저장되어 다음 학습 때는 새 사진만 처리합니다.
+
+**Python으로 학습하기(선택):** 사진이 수만 장이거나 서버에서 돌리고 싶을 때 씁니다.
 
 ### 1. 환경
 
@@ -161,6 +176,7 @@ python training/predict.py data/ai_glasses/*.jpg --save-crops /tmp/crops   # 잘
 python tests/test_pipeline.py            # 합성 데이터 → 학습 → 예측
 python tests/test_pipeline.py --browser  # + 브라우저와 결과가 같은지, 가짜 웹캠으로 실시간 화면 검사 (Node + Playwright 필요)
 node --test tests/tracker.test.mjs        # 추적·평균·ZIP 단위 테스트
+python tests/logreg_parity.py             # 브라우저 학습(web/logreg.js) == scikit-learn
 ```
 
 `tests/make_synthetic.py`는 scikit-image에 포함된 공개 사진에 만화 같은 안경을 그려 **배관 점검용** 데이터를 만듭니다.
@@ -176,6 +192,9 @@ web/                      GitHub Pages로 배포되는 정적 앱
   pipeline.js             판독 파이프라인 (training/glasses_features.py 와 1:1 대응)
   tracker.js              얼굴 추적, 박스 흔들림 보정, 프레임 평균
   zip.js                  학습 데이터 ZIP 만들기
+  train.html, train.js    브라우저 안 모델 학습 페이지
+  logreg.js, train-worker.js  로지스틱 회귀(L-BFGS)·교차검증 (Web Worker)
+  unzip.js                ZIP 읽기
   sw.js                   오프라인 캐시
   models/                 face_landmarker.task, mobilenet_v3_large.tflite, (head.json)
   vendor/                 @mediapipe/tasks-vision 1.2.2 런타임 (wasm 포함)

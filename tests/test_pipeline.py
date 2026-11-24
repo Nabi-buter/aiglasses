@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -87,8 +88,8 @@ def main():
             shot = Path(args.screenshot).resolve() if args.screenshot else tmp / "live.png"
             live = subprocess.run(["node", "tests/live_e2e.cjs", base, str(head_path), str(cam), str(shot)],
                                   cwd=ROOT, capture_output=True, text=True, env=env, timeout=300)
-            srv.shutdown()
             if live.returncode:
+                srv.shutdown()
                 sys.exit(live.stderr)
             lr = json.loads(live.stdout)
             print("live view (left → right):")
@@ -98,12 +99,37 @@ def main():
             assert len(verdicts) == 2 and lr["ids"] == 2, f"tracking failed: {lr}"
             assert verdicts[0] in ("AI_GLASSES", "SUSPECTED") and verdicts[1] == "REGULAR", verdicts
             assert any(l["verdict"] in ("AI_GLASSES", "SUSPECTED") for l in lr["log"]), "red box was not logged"
-            import zipfile
             with zipfile.ZipFile(lr["zip"]["path"]) as z:
                 assert z.testzip() is None and "labels.csv" in z.namelist()
                 assert sum(n.startswith("ai_glasses/") for n in z.namelist()) >= 2
             bad = [e for e in lr["errors"] if not e.startswith("INFO:")]
             assert not bad, bad
+
+            # In-browser training page: same dataset as a (deflate) ZIP -> head.json in the browser.
+            zpath = tmp / "dataset.zip"
+            with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+                for f in sorted(data.glob("*/*.jpg")):
+                    z.write(f, f.relative_to(data).as_posix())
+            tshot = str(shot).replace(".png", "_train.png")
+            tr = subprocess.run(["node", "tests/train_e2e.cjs", base, str(zpath), tshot],
+                                cwd=ROOT, capture_output=True, text=True, env=env, timeout=1200)
+            srv.shutdown()
+            if tr.returncode:
+                sys.exit(tr.stderr)
+            tb = json.loads(tr.stdout)
+            hb = tb["head"]
+            print(f"browser training: {tb['secs']:.0f}s  C={hb['C']}  cv acc={hb['cv']['accuracy']}  "
+                  f"auc={hb['cv']['ai_auc']}  suspect={hb['thresholds']['suspect']}")
+            assert hb["cv"]["accuracy"] >= 0.9 and hb["classes"] == head["classes"], hb["cv"]
+            if hb["C"] == head["C"]:   # same C -> the final models must agree (features from Python)
+                feats = np.stack([ex.feature for ex, _ in py.values()])
+                def proba(h):
+                    z = feats @ np.asarray(h["W"]).T + np.asarray(h["b"])
+                    e = np.exp(z - z.max(1, keepdims=True))
+                    return e / e.sum(1, keepdims=True)
+                dp = float(np.abs(proba(hb) - proba(head)).max())
+                print(f"  browser-trained vs python-trained head: max|Δp|={dp:.4f}")
+                assert dp < 0.02, dp
             print("browser vs python:")
             for r in json.loads(out.stdout):
                 name = Path(r["file"]).name

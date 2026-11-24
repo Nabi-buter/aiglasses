@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>판독 모델 학습</title>
+<meta name="description" content="모은 안경 사진으로 AI 안경 판독 모델을 브라우저 안에서 학습합니다. 사진은 이 기기 밖으로 나가지 않습니다.">
+<meta name="theme-color" content="#1f4e79">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 46 30'%3E%3Crect x='2' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Crect x='27' y='7' width='17' height='14' rx='5' fill='none' stroke='%231f4e79' stroke-width='3'/%3E%3Ccircle cx='6' cy='10.5' r='2.5' fill='%23c8323c'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap narrow">
+  <header class="top">
+    <div class="brand">
+      <svg width="46" height="30" viewBox="0 0 46 30" aria-hidden="true">
+        <rect x="2" y="7" width="17" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <rect x="27" y="7" width="17" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="M19 12 q4 -3 8 0" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <circle cx="6" cy="10.5" r="2" fill="#c8323c"/>
+        <circle cx="40" cy="10.5" r="2" fill="#c8323c"/>
+      </svg>
+      <div>
+        <h1>판독 모델 학습</h1>
+        <p class="sub">모은 사진으로 AI 안경 판독 모델을 만듭니다 · 사진은 이 기기 밖으로 나가지 않습니다</p>
+      </div>
+    </div>
+    <a class="btn ghost small" href="./">← 실시간 판독으로</a>
+  </header>
+
+  <section class="panel" aria-labelledby="h-data">
+    <h2 id="h-data"><span><span class="step">1</span>학습 사진 넣기</span><button class="small ghost" id="clearData" disabled>비우기</button></h2>
+    <div class="drop" id="drop" tabindex="0">
+      <p><b>수집한 ZIP 파일</b>이나 <b>data 폴더</b>를 여기에 끌어다 놓으세요.</p>
+      <p class="hint">폴더 이름으로 정답을 구분합니다: <code>ai_glasses/</code> · <code>regular_glasses/</code> · <code>no_glasses/</code>. 실시간 판독 화면의 ‘학습 데이터 수집’ ZIP이 그대로 맞습니다. 여러 번에 걸쳐 모은 ZIP을 한꺼번에 넣어도 됩니다.</p>
+      <div class="controls">
+        <label class="btn" for="zipIn">ZIP 파일 선택<input type="file" id="zipIn" accept=".zip,application/zip" multiple></label>
+        <label class="btn ghost" for="dirIn">폴더 선택<input type="file" id="dirIn" webkitdirectory multiple></label>
+      </div>
+    </div>
+    <div id="dataSummary"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-train">
+    <h2 id="h-train"><span><span class="step">2</span>학습</span></h2>
+    <div class="fields">
+      <label class="f" for="target">빨간 박스로 잡을 AI 안경 비율 (목표)
+        <select id="target">
+          <option value="0.9">90% — 오탐 적게</option>
+          <option value="0.95" selected>95% — 권장</option>
+          <option value="0.98">98% — 놓침 최소</option>
+        </select>
+      </label>
+      <label class="f" for="aiT">‘AI 안경’(확신) 기준 확률
+        <select id="aiT">
+          <option value="0.5">50%</option>
+          <option value="0.6" selected>60%</option>
+          <option value="0.7">70%</option>
+        </select>
+      </label>
+      <label class="f" for="note">메모 (모델에 기록)
+        <input id="note" type="text" maxlength="120" placeholder="예: 2026-12 1차 수집, 3개 고사장">
+      </label>
+    </div>
+    <label class="tog"><input type="checkbox" id="flip" checked> 좌우 반전 사진도 함께 학습 (권장)</label>
+    <div class="controls">
+      <button class="primary" id="trainBtn" disabled>학습 시작</button>
+      <button class="ghost" id="stopBtn" hidden>중지</button>
+    </div>
+    <div class="progress" id="progress" hidden>
+      <div class="pstage" id="pStage"></div>
+      <div class="bar"><i id="pBar"></i></div>
+      <div class="hint" id="pDetail"></div>
+    </div>
+    <p class="hint">사진마다 얼굴을 찾아 안경 영역 특징을 뽑은 뒤(사진 1장에 0.1~0.5초), 사람 단위로 나눈 교차검증으로 성능을 재고 최종 모델을 만듭니다. 한 번 처리한 사진은 이 브라우저에 특징값이 저장되어, 다음 학습 때는 새 사진만 처리합니다. 노트북·데스크톱 사용을 권장합니다.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="h-result" id="resultPanel" hidden>
+    <h2 id="h-result"><span><span class="step">3</span>결과</span></h2>
+    <div id="results"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-apply" id="applyPanel" hidden>
+    <h2 id="h-apply"><span><span class="step">4</span>모델 적용 · 배포</span></h2>
+    <div class="controls">
+      <button class="primary" id="useHere">이 기기에서 바로 사용</button>
+      <button id="dlHead">head.json 내려받기</button>
+    </div>
+    <div id="applyMsg"></div>
+    <div class="setup">
+      <p><b>모든 감독관 기기에 배포하려면</b> 내려받은 <code>head.json</code>을 저장소에 올리세요. 1~2분 뒤 웹 주소에 자동으로 반영됩니다.</p>
+      <ol class="steps">
+        <li>GitHub 저장소에서 <code>web/models</code> 폴더를 엽니다.</li>
+        <li><b>Add file → Upload files</b>로 <code>head.json</code>을 올리고 <b>Commit changes</b>를 누릅니다 (main 브랜치).</li>
+        <li>감독관은 웹 주소를 새로 고치기만 하면 새 모델을 씁니다. 판독 화면의 ‘판독 모델’ 칸에서 학습 시각으로 확인할 수 있습니다.</li>
+      </ol>
+      <p class="hint"><code>head.json</code>에는 숫자(가중치)와 성능 수치만 들어 있고 사진은 들어 있지 않습니다. 사진은 저장소에 올리지 마세요.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>특징 추출: MediaPipe Face Landmarker + MobileNetV3 · 분류기: 로지스틱 회귀 (training/train.py 와 같은 결과)</span>
+  </footer>
+</div>
+<script type="module" src="train.js"></script>
+</body>
+</html>

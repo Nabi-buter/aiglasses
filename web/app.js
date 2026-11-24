@@ -111,9 +111,8 @@ function renderModelInfo() {
   if (!h) {
     const s = el("div", "setup");
     s.append(el("p", null, "아직 학습된 모델(head.json)이 없습니다. 화면에 안경 영역 박스는 그려지지만 AI 안경 여부와 확률은 나오지 않습니다."));
-    const pre = el("pre");
-    pre.textContent = "pip install -r training/requirements.txt\npython training/train.py --data data --out web/models/head.json";
-    s.append(el("p", null, "‘학습 데이터 수집’으로 사진을 모은 뒤 저장소에서 아래처럼 학습해 다시 배포하거나, 만든 head.json 을 ‘모델 파일 불러오기’로 넣으세요."), pre);
+    const a = el("a", "btn primary", "모델 학습 페이지 열기"); a.href = "train.html";
+    s.append(el("p", null, "아래 ‘학습 데이터 수집’으로 사진을 모은 뒤, 모델 학습 페이지에 ZIP을 넣으면 이 브라우저에서 바로 학습됩니다."), a);
     box.append(s);
     return;
   }

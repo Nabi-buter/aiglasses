@@ -26,5 +26,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Unit tests (tracker, zip)
         run: node --test tests/tracker.test.mjs
-      - name: Synthetic train + Python/browser parity + live view on a fake webcam
+      - name: In-browser training matches scikit-learn
+        run: python tests/logreg_parity.py
+      - name: Synthetic train + Python/browser parity + live view + in-browser training
         run: python tests/test_pipeline.py --browser
