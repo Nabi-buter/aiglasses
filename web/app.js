@@ -325,14 +325,18 @@ function styleFor(t, minFace) {
 }
 
 /** Draw the frame and the boxes. W×H is the output size in drawing units; scale maps frame px -> units. */
-function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opts.minFace, selected = null, unit = 1 } = {}) {
+function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opts.minFace, selected = null, unit = 1, cover = false } = {}) {
   // unit: drawing units per CSS pixel (devicePixelRatio on screen, larger for full-resolution snapshots)
-  const s = W / src.width;
+  // cover: fill W×H completely (full screen); the frame is centred and its overflowing edges are cut off.
+  const s = cover ? Math.max(W / src.width, H / src.height) : W / src.width;
+  const ox = cover ? (W - src.width * s) / 2 : 0, oy = cover ? (H - src.height * s) / 2 : 0;
+  if (cover) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); }
   ctx.save();
   if (mirror) { ctx.translate(W, 0); ctx.scale(-1, 1); }
-  ctx.drawImage(src, 0, 0, W, H);
+  ctx.drawImage(src, ox, oy, src.width * s, src.height * s);
   ctx.restore();
-  const X = (x) => (mirror ? W - x * s : x * s);
+  const X = (x) => (mirror ? W - (ox + x * s) : ox + x * s);
+  const Y = (y) => oy + y * s;
   const cssW = W / unit;
   const fs = Math.round(Math.min(20, Math.max(13, cssW / 42)) * unit);
   const lw = Math.max(2, Math.round(Math.max(2.5, cssW / 300) * unit));
@@ -344,7 +348,7 @@ function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opt
     const st = styleFor(t, minFace);
     if (st.hide) continue;
     const xa = X(t.box.x0), xb = X(t.box.x1);
-    const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = t.box.y0 * s, y1 = t.box.y1 * s;
+    const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = Y(t.box.y0), y1 = Y(t.box.y1);
     const sel = selected === t.id;
     const w = (st.na ? lw * 0.6 : lw) * (sel ? 1.6 : 1);
     ctx.globalAlpha = st.faint ? 0.75 : 1;
@@ -359,7 +363,7 @@ function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opt
       for (const k of ["hinge_l", "hinge_r"]) {
         const b = t.boxes[k]; if (!b || b.empty) continue;
         const ha = X(b.x0), hb = X(b.x1);
-        ctx.strokeRect(Math.min(ha, hb), b.y0 * s, Math.abs(hb - ha), (b.y1 - b.y0) * s);
+        ctx.strokeRect(Math.min(ha, hb), Y(b.y0), Math.abs(hb - ha), (b.y1 - b.y0) * s);
       }
       ctx.setLineDash([]);
     }
@@ -369,7 +373,7 @@ function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opt
     ctx.font = `700 ${f}px "Pretendard","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif`;
     const tw = ctx.measureText(text).width, iw = ctx.measureText(idText).width * 0.8;
     const padX = f * 0.5, th = Math.round(f * 1.6), tabW = tw + iw + padX * 3;
-    let ty = y0 - th; if (ty < 0) ty = y0;               // no room above: put the tab inside the box
+    let ty = y0 - th; if (ty < 0) ty = Math.max(0, y0);  // no room above: put the tab inside the box (on screen)
     let tx = x0 - w / 2; if (tx + tabW > W) tx = W - tabW;
     ctx.fillStyle = st.color; ctx.fillRect(Math.max(0, tx), ty, tabW, th);
     ctx.fillStyle = "#fff"; ctx.fillText(text, Math.max(0, tx) + padX, ty + th / 2 + 1);
@@ -378,6 +382,7 @@ function drawScene(ctx, src, W, H, tracks, { mirror = false, minFace = state.opt
     ctx.fillText(idText, Math.max(0, tx) + padX * 2 + tw, ty + th / 2 + 1);
     ctx.globalAlpha = 1;
   }
+  return { s, ox, oy };
 }
 
 function render() {
@@ -385,20 +390,22 @@ function render() {
   if (!src || !src.width || (state.mode === "live" && !state.stream)) { c.hidden = true; $("stage").style.height = ""; $("modeTag").hidden = true; return; }
   c.hidden = false;
   const stage = $("stage");
-  // Full screen: the whole frame fitted into the whole screen (nothing cropped, widest view).
-  const maxH = state.fs ? stage.clientHeight : Math.max(260, window.innerHeight * 0.72);
+  // Full screen: the canvas is exactly the screen and the frame covers it (no empty bars).
+  const maxH = Math.max(260, window.innerHeight * 0.72);
   let W = stage.clientWidth, H = W * src.height / src.width;
-  if (H > maxH) { H = maxH; W = H * src.width / src.height; }
+  if (state.fs) H = stage.clientHeight;
+  else if (H > maxH) { H = maxH; W = H * src.width / src.height; }
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const bw = Math.round(W * dpr), bh = Math.round(H * dpr);
   if (c.width !== bw || c.height !== bh) { c.width = bw; c.height = bh; }
   c.style.width = W + "px"; c.style.height = H + "px";
   if (!state.fs) stage.style.height = H + "px";
   const ctx = c.getContext("2d");
-  drawScene(ctx, src, bw, bh, currentTracks(), {
-    mirror: mirrored(), selected: state.selectedId, unit: dpr,
+  const xf = drawScene(ctx, src, bw, bh, currentTracks(), {
+    mirror: mirrored(), selected: state.selectedId, unit: dpr, cover: !!state.fs,
     minFace: state.mode === "photo" ? PHOTO_MIN_FACE : state.opts.minFace,
   });
+  state.viewXf = { s: xf.s * W / bw, ox: xf.ox * W / bw, oy: xf.oy * H / bh, W };   // CSS px, for tapping boxes
   const P = state.perf;
   $("perfTag").hidden = !state.opts.perf || state.mode !== "live";
   $("perfTag").textContent = `${P.fps.toFixed(0)} fps · 얼굴 ${P.det.toFixed(0)}ms · 판독 ${P.cls.toFixed(0)}ms`;
@@ -410,10 +417,11 @@ function render() {
 function hitTest(ev) {
   const c = $("view"), r = c.getBoundingClientRect(), src = sourceCanvas();
   if (!src) return null;
-  const s = src.width / r.width;
-  let x = (ev.clientX - r.left) * s; const y = (ev.clientY - r.top) * s;
-  if (mirrored()) x = src.width - x;
-  const hits = currentTracks().filter((t) => x >= t.box.x0 && x <= t.box.x1 && y >= t.box.y0 - 30 * s && y <= t.box.y1);
+  const v = state.viewXf || { s: r.width / src.width, ox: 0, oy: 0, W: r.width };
+  let cx = ev.clientX - r.left;
+  if (mirrored()) cx = v.W - cx;
+  const x = (cx - v.ox) / v.s, y = (ev.clientY - r.top - v.oy) / v.s, tab = 30 / v.s;   // 30 CSS px: the label above the box
+  const hits = currentTracks().filter((t) => x >= t.box.x0 && x <= t.box.x1 && y >= t.box.y0 - tab && y <= t.box.y1);
   return hits.sort((a, b) => (a.box.x1 - a.box.x0) - (b.box.x1 - b.box.x0))[0] || null;
 }
 
@@ -764,14 +772,14 @@ $("fsBtn").onclick = enterFs;
 (() => {
   const st = $("stage");
   let start = null;
-  // e.timeStamp = when the finger moved, not when the (busy) main thread got to it
-  st.addEventListener("pointerdown", (e) => { if (state.fs) start = { x: e.clientX, y: e.clientY, t: e.timeStamp }; });
+  st.addEventListener("pointerdown", (e) => { if (state.fs) start = { x: e.clientX, y: e.clientY }; });
   st.addEventListener("pointercancel", () => (start = null));
   st.addEventListener("pointerup", (e) => {
     if (!state.fs || !start) return;
-    const dx = e.clientX - start.x, dy = e.clientY - start.y, dt = e.timeStamp - start.t;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
     start = null;
-    if (dy > Math.max(70, window.innerHeight * 0.1) && Math.abs(dx) < dy * 0.7 && dt < 3000) { state.swipedAt = performance.now(); exitFs(); }
+    // direction and distance only: a slow, deliberate drag down also counts
+    if (dy > Math.max(70, window.innerHeight * 0.1) && Math.abs(dx) < dy * 0.7) { state.swipedAt = performance.now(); exitFs(); }
   });
   st.addEventListener("dblclick", (e) => { if (!state.fs) { e.preventDefault(); enterFs(); } });
 })();

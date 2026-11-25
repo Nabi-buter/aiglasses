@@ -24,13 +24,34 @@ async function check(browser, base, ctxOpts, touch, shot) {
       const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return top && (top === b || b.contains(top));
     }).map((b) => b.id || b.textContent.trim());
-    return { canvas: [c.width, c.height], stage: [st.width, st.height], visibleButtons,
+    // corners of the drawn canvas must be camera image, not empty bars (the stage/bars are pure black)
+    const cv = document.getElementById("view"), ctx = cv.getContext("2d");
+    const px = (x, y) => [...ctx.getImageData(Math.min(cv.width - 1, x), Math.min(cv.height - 1, y), 1, 1).data].slice(0, 3);
+    const corners = [px(2, 2), px(cv.width - 3, 2), px(2, cv.height - 3), px(cv.width - 3, cv.height - 3)];
+    return { canvas: [c.width, c.height], stage: [st.width, st.height], visibleButtons, corners,
       hint: getComputedStyle(document.getElementById("fsHint")).opacity, native: !!document.fullscreenElement };
   });
   if (shot) await page.screenshot({ path: `${shot}_${touch ? "phone" : "desktop"}.png` });
   const fills = Math.abs(inFs.stage[0] - vp.width) < 2 && Math.abs(inFs.stage[1] - vp.height) < 2 &&
-    (Math.abs(inFs.canvas[0] - vp.width) < 2 || Math.abs(inFs.canvas[1] - vp.height) < 2);
+    Math.abs(inFs.canvas[0] - vp.width) < 2 && Math.abs(inFs.canvas[1] - vp.height) < 2;
   if (!fills) throw new Error("full screen does not fill the viewport: " + JSON.stringify({ vp, inFs }));
+  if (inFs.corners.some((c) => c.every((v) => v < 8))) throw new Error("empty (black) area in full screen: " + JSON.stringify(inFs.corners));
+  // tapping a box in the (cropped) full-screen view selects that person
+  const tap = await page.evaluate(() => {
+    const s = window.__aig, v = s.viewXf, t = s.tracker.tracks.find((x) => x.visible);
+    if (!t || !v) return null;
+    const r = document.getElementById("view").getBoundingClientRect();
+    let cx = v.ox + ((t.box.x0 + t.box.x1) / 2) * v.s;
+    if (s.facing === "user") cx = v.W - cx;
+    return { id: t.id, x: r.left + cx, y: r.top + v.oy + ((t.box.y0 + t.box.y1) / 2) * v.s };
+  });
+  if (tap && tap.x > 0 && tap.y > 0 && tap.x < vp.width && tap.y < vp.height) {
+    await page.mouse.click(tap.x, tap.y);
+    await page.waitForTimeout(200);
+    const sel = await page.evaluate(() => window.__aig.selectedId);
+    if (sel !== tap.id) throw new Error(`tap on box #${tap.id} selected ${sel}`);
+    inFs.tapped = tap.id;
+  }
   if (inFs.visibleButtons.length) throw new Error("buttons visible in full screen: " + inFs.visibleButtons.join(", "));
 
   const swipe = async (dy) => {
@@ -59,7 +80,7 @@ async function check(browser, base, ctxOpts, touch, shot) {
     await page.keyboard.press("Escape"); await page.waitForFunction(() => !window.__aig.fs);
   }
   await ctx.close();
-  return { viewport: vp, canvas: inFs.canvas, native: inFs.native, errors };
+  return { viewport: vp, canvas: inFs.canvas, native: inFs.native, tapped: inFs.tapped ?? null, errors };
 }
 
 (async () => {
