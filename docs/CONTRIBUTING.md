@@ -31,8 +31,10 @@
 ## ‘바로 적용’용 GitHub 토큰
 
 1. [GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token](https://github.com/settings/personal-access-tokens/new)
-2. **Repository access:** Only select repositories → 이 저장소만
-3. **Repository permissions → Contents:** Read and write (다른 권한은 필요 없음)
+2. **Repository access:** Only select repositories → 이 저장소만 (먼저 해야 저장소 권한을 고를 수 있음)
+3. **Permissions:** 목록이 비어 있으면 **Add permissions** → **Contents** 추가 → **Read and write**로 변경
+   - 자동으로 붙는 Metadata: Read-only는 그대로 둡니다.
+   - 다른 권한은 필요 없습니다.
 4. 만료일을 정해 만들고, 학습 페이지의 토큰 칸에 붙여 넣어 **확인·저장**
 
 - 토큰은 그 브라우저(localStorage)에만 저장되고 `api.github.com`으로만 보내집니다. 사이트나 저장소에는 들어가지 않습니다.
