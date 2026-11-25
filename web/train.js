@@ -15,7 +15,7 @@ const C_GRID = [0.1, 0.3, 1.0, 3.0, 10.0];   // == train.py
 const HEAD_KEY = "aiGlassesCustomHead.v1";   // == app.js: the live view picks it up
 const D = 2560;
 
-const state = { items: new Map(), head: null, running: false, abort: false, workers: [], detector: null, rows: null, base: undefined };
+const state = { items: new Map(), pending: [], head: null, running: false, abort: false, workers: [], detector: null, rows: null, base: undefined };
 
 /* ---------------- base data (shipped with the app: features only, no photos) ---------------- */
 async function loadBase() {
@@ -56,9 +56,19 @@ function progress(stage, frac, detail = "") {
 function notice(box, kind, text) { $(box).replaceChildren(el("div", kind, text)); }
 
 /* ---------------- dataset ---------------- */
+// Folder names that mean a class (case, spaces, "-" and "_" ignored; Korean names too).
+const FOLDER_LABELS = {
+  ai_glasses: ["aiglasses", "aiglass", "smartglasses", "smartglass", "ai", "ai안경", "스마트안경", "ai글래스", "스마트글래스"],
+  regular_glasses: ["regularglasses", "regular", "normalglasses", "normal", "glasses", "eyeglasses", "일반안경", "일반", "안경", "보통안경"],
+  no_glasses: ["noglasses", "noglass", "none", "nothing", "안경없음", "안경안씀", "맨얼굴", "없음"],
+};
+const norm = (s) => s.normalize("NFC").toLowerCase().replace(/[\s_\-.]+/g, "");
 function labelOf(path) {
   const segs = path.split("/").slice(0, -1);
-  for (let i = segs.length - 1; i >= 0; i--) if (KNOWN.includes(segs[i])) return segs[i];
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const n = norm(segs[i]);
+    for (const [label, names] of Object.entries(FOLDER_LABELS)) if (names.includes(n)) return label;
+  }
   return null;
 }
 /** == train.py group_of(): files named "p07__xxx.jpg" share the group "<class>/p07". */
@@ -66,32 +76,44 @@ function groupOf(path, label) {
   const base = path.split("/").pop(), stem = base.replace(/\.[^.]+$/, "");
   return stem.includes("__") ? `${label}/${stem.split("__")[0]}` : path;
 }
-function addItem(path, getBlob, source) {
+function addItem(path, getBlob, source, forced = null) {
   const name = path.split("/").pop();
   if (!IMG.test(name) || name.startsWith("._") || path.includes("__MACOSX/")) return false;
-  const label = labelOf(path);
-  if (!label) { state.unlabeled = (state.unlabeled || 0) + 1; return false; }
+  const label = forced || labelOf(path);
   const key = source + "!" + path;
-  if (!state.items.has(key)) state.items.set(key, { key, path, label, group: groupOf(path, label), getBlob });
+  if (!label) {                     // no class folder: keep it and ask which class it is
+    if (!state.items.has(key) && !state.pending.some((p) => p.key === key)) state.pending.push({ key, path, getBlob });
+    return true;
+  }
+  state.pending = state.pending.filter((p) => p.key !== key);
+  state.items.set(key, { key, path, label, group: groupOf(path, label), getBlob });
   return true;
 }
-async function addZip(file) {
+function assignPending(label) {
+  for (const p of state.pending) state.items.set(p.key, { key: p.key, path: p.path, label, group: groupOf(p.path, label), getBlob: p.getBlob });
+  state.pending = [];
+  renderData();
+}
+async function addZip(file, forced = null) {
   const entries = await listZip(file);
   let n = 0;
   for (const e of entries) {
-    if (addItem(e.name, async () => new Blob([await e.read()]), file.name + ":" + file.size)) n++;
+    if (addItem(e.name, async () => new Blob([await e.read()]), file.name + ":" + file.size, forced)) n++;
   }
   return n;
 }
-async function addFiles(files) {
+async function addFiles(files, forced = null) {
   if (state.running) return;
-  let added = 0, errors = [];
+  let added = 0, ignored = 0;
+  const errors = [];
   for (const f of files) {
     try {
-      if (/\.zip$/i.test(f.name)) added += await addZip(f);
-      else if (addItem(f.relPath || f.webkitRelativePath || f.name, async () => f, "fs")) added++;
+      if (/\.zip$/i.test(f.name)) added += await addZip(f, forced);
+      else if (addItem(f.relPath || f.webkitRelativePath || f.name, async () => f, "fs:" + f.size + ":" + f.lastModified, forced)) added++;
+      else ignored++;
     } catch (e) { errors.push(`${f.name}: ${e.message || e}`); }
   }
+  if (!added && !errors.length) errors.push(ignored ? `사진 파일이 아닙니다 (${ignored}개). JPG·PNG·WEBP 사진이나 ZIP을 넣어 주세요.` : "넣은 파일에서 사진을 찾지 못했습니다.");
   renderData(errors);
   return added;
 }
@@ -119,13 +141,52 @@ function summary() {
   return by;
 }
 
+function trainBlocker(by, total) {
+  if (state.running) return "학습 중입니다…";
+  if (state.pending.length) return `정답을 고르지 않은 사진 ${state.pending.length}장이 있습니다. 위에서 정답을 골라 주세요.`;
+  if (!total) return "먼저 위 ‘1. 학습 사진 넣기’에 사진을 넣으세요.";
+  if (state.base === undefined && $("withBase").checked) return "기본 공개 데이터를 불러오는 중입니다… 잠시 기다려 주세요.";
+  if (useBase()) return total < 5 ? `사진이 ${total}장입니다. 5장 이상 넣어 주세요.` : "";
+  const miss = REQUIRED.filter((c) => !(by[c]?.n >= 5));
+  return miss.length ? `${miss.map((c) => NAMES[c]).join("·")} 사진이 각각 5장 이상 필요합니다. ‘기본 공개 데이터도 함께 학습’을 켜면 한 종류만 있어도 됩니다.` : "";
+}
+
 function renderData(errors = []) {
   const box = $("dataSummary"); box.replaceChildren();
   const by = summary(), total = state.items.size;
-  $("clearData").disabled = !total || state.running;
+  $("clearData").disabled = !(total || state.pending.length) || state.running;
   $("sharePanel").hidden = !total;
-  $("makeShare").disabled = !total || state.running || !$("consent").checked;
-  $("trainBtn").disabled = state.running || (useBase() ? total < 5 : !REQUIRED.every((c) => by[c]?.n >= 5));
+  $("makeShare").disabled = !total || state.running || !$("consent").checked || state.pending.length > 0;
+  const why = trainBlocker(by, total);
+  $("trainBtn").disabled = !!why;
+  $("trainWhy").textContent = why;
+  $("trainWhy").hidden = !why;
+
+  if (state.pending.length) {
+    const pb = el("div", "pending");
+    pb.append(el("p", null, `정답 폴더 없이 들어온 사진 ${state.pending.length}장이 있습니다. 이 사진들의 정답을 고르세요:`));
+    const thumbs = el("div", "pthumbs");
+    for (const p of state.pending.slice(0, 8)) {
+      const c = el("canvas"); c.width = 96; c.height = 72; thumbs.append(c);
+      p.getBlob().then((b) => createImageBitmap(b, { imageOrientation: "from-image" })).then((bmp) => {
+        const k = Math.min(c.width / bmp.width, c.height / bmp.height);
+        c.getContext("2d").drawImage(bmp, (c.width - bmp.width * k) / 2, (c.height - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+      }).catch(() => {});
+    }
+    if (state.pending.length > 8) thumbs.append(el("span", "hint", `외 ${state.pending.length - 8}장`));
+    const btns = el("div", "controls");
+    for (const c of KNOWN) {
+      const b = el("button", c === AI ? "danger" : "", `모두 ${NAMES[c]}`);
+      b.onclick = () => assignPending(c);
+      btns.append(b);
+    }
+    const drop = el("button", "ghost small", "이 사진들 빼기");
+    drop.onclick = () => { state.pending = []; renderData(); };
+    btns.append(drop);
+    pb.append(thumbs, btns,
+      el("p", "hint", "정답이 섞여 있다면 정답별로 나눠서 아래 ‘AI 안경 사진 추가’ 같은 버튼으로 따로 넣거나, 폴더(ai_glasses / regular_glasses / no_glasses)로 나눠 넣으세요."));
+    box.append(pb);
+  }
   if (!total) {
     if (errors.length) box.append(el("div", "err", errors.join("\n")));
     return;
@@ -151,7 +212,6 @@ function renderData(errors = []) {
   const small = Math.min(...REQUIRED.map((c) => by[c]?.n || 0));
   if (small >= 5 && small < 200) warn.push(`사진이 적습니다. 실전에 쓰려면 클래스당 200장 이상, 사람 30명 이상을 권장합니다.`);
   if (!by.no_glasses && !useBase()) warn.push("‘안경 없음’ 사진이 없습니다. 넣지 않으면 안경을 안 쓴 사람도 AI 안경·일반 안경 중 하나로 표시됩니다.");
-  if (state.unlabeled) warn.push(`정답 폴더(ai_glasses 등) 밖에 있는 사진 ${state.unlabeled}장은 건너뛰었습니다.`);
   for (const w of warn) box.append(el("div", "warnbox", w));
   if (errors.length) box.append(el("div", "err", errors.join("\n")));
 }
@@ -550,7 +610,9 @@ async function makeContribution() {
 /* ---------------- wire up ---------------- */
 $("zipIn").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
 $("dirIn").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
-$("clearData").onclick = () => { state.items.clear(); state.unlabeled = 0; renderData(); };
+$("clearData").onclick = () => { state.items.clear(); state.pending = []; renderData(); };
+for (const [id, label] of [["addAi", "ai_glasses"], ["addReg", "regular_glasses"], ["addNo", "no_glasses"]])
+  $(id).onchange = (e) => { addFiles([...e.target.files], label); e.target.value = ""; };
 $("trainBtn").onclick = train;
 $("stopBtn").onclick = () => { state.abort = true; stopWorkers(); };
 const drop = $("drop");

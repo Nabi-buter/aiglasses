@@ -31,10 +31,15 @@
   <section class="panel" aria-labelledby="h-data">
     <h2 id="h-data"><span><span class="step">1</span>학습 사진 넣기</span><button class="small ghost" id="clearData" disabled>비우기</button></h2>
     <div class="drop" id="drop" tabindex="0">
-      <p><b>수집한 ZIP 파일</b>이나 <b>data 폴더</b>를 여기에 끌어다 놓으세요.</p>
-      <p class="hint">폴더 이름으로 정답을 구분합니다: <code>ai_glasses/</code> · <code>regular_glasses/</code> · <code>no_glasses/</code>. 실시간 판독 화면의 ‘학습 데이터 수집’ ZIP이 그대로 맞습니다. 여러 번에 걸쳐 모은 ZIP을 한꺼번에 넣어도 됩니다.</p>
+      <p><b>가장 쉬운 방법:</b> 정답별 버튼으로 사진을 고르세요. 폴더를 만들 필요가 없고 휴대폰에서도 됩니다.</p>
       <div class="controls">
-        <label class="btn" for="zipIn">ZIP 파일 선택<input type="file" id="zipIn" accept=".zip,application/zip" multiple></label>
+        <label class="btn danger" for="addAi">AI 안경 사진 추가<input type="file" id="addAi" accept="image/*,.zip" multiple></label>
+        <label class="btn" for="addReg">일반 안경 사진 추가<input type="file" id="addReg" accept="image/*,.zip" multiple></label>
+        <label class="btn" for="addNo">안경 없음 사진 추가<input type="file" id="addNo" accept="image/*,.zip" multiple></label>
+      </div>
+      <p class="hint">또는 <b>수집한 ZIP</b>이나 <b>정답별로 나눈 폴더</b>를 여기에 끌어다 놓으세요. 폴더 이름으로 정답을 구분합니다: <code>ai_glasses</code>(또는 AI안경) · <code>regular_glasses</code>(또는 일반안경) · <code>no_glasses</code>(또는 안경없음). 폴더 없이 넣은 사진은 정답을 물어봅니다.</p>
+      <div class="controls">
+        <label class="btn ghost" for="zipIn">ZIP 파일 선택<input type="file" id="zipIn" accept=".zip,application/zip" multiple></label>
         <label class="btn ghost" for="dirIn">폴더 선택<input type="file" id="dirIn" webkitdirectory multiple></label>
       </div>
     </div>
@@ -67,6 +72,7 @@
     <p class="hint" id="baseHint">기본 공개 데이터는 앱에 들어 있는 공개 사진(Open Images, Wikimedia Commons)의 특징값입니다(사진은 없음). 직접 모은 사진과 합쳐 학습하므로 사진이 적어도 세 가지 판정이 모두 나오고, 모을수록 직접 찍은 조건에 맞게 좋아집니다.</p>
     <div class="controls">
       <button class="primary" id="trainBtn" disabled>학습 시작</button>
+      <span class="why" id="trainWhy" hidden></span>
       <button class="ghost" id="stopBtn" hidden>중지</button>
     </div>
     <div class="progress" id="progress" hidden>
