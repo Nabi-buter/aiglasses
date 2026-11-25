@@ -68,6 +68,7 @@ def main():
                     pass
             handler = functools.partial(Quiet, directory=str(ROOT))
             srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            srv.handle_error = lambda request, client_address: None   # browsers closing mid-download (BrokenPipe)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             base = f"http://127.0.0.1:{srv.server_address[1]}"
             rel = lambda p: "/" + p.relative_to(ROOT).as_posix()  # noqa: E731
@@ -104,6 +105,16 @@ def main():
                 assert sum(n.startswith("ai_glasses/") for n in z.namelist()) >= 2
             bad = [e for e in lr["errors"] if not e.startswith("INFO:")]
             assert not bad, bad
+
+            # Full-screen camera (desktop + phone touch) and the training-data counts panel.
+            fs = subprocess.run(["node", "tests/fullscreen_e2e.cjs", base, str(cam)],
+                                cwd=ROOT, capture_output=True, text=True, env=env, timeout=600)
+            if fs.returncode:
+                srv.shutdown()
+                sys.exit(fs.stderr[-2000:])
+            fr = json.loads(fs.stdout)
+            print(f"full screen: desktop canvas {fr['desktop']['canvas']} / phone {fr['phone']['canvas']}, swipe down exits; "
+                  f"training data counts: {fr['stats'][-1]}")
 
             # Before any training: only the built-in presence model -> blue (glasses) / grey (none).
             cam2 = tmp / "cam_nohead.y4m"

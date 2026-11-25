@@ -46,11 +46,14 @@
             <span class="nomodel" id="noModelTag" hidden></span>
           </div>
           <div class="alert" id="alertBanner" role="alert" hidden></div>
+          <div class="fsgrab" aria-hidden="true"></div>
+          <div class="fshint" id="fsHint" aria-live="polite">아래로 쓸어내리면 원래 화면으로 돌아갑니다</div>
           <div class="msg" id="stageMsg"><span class="spin"></span><p id="stageMsgText">카메라를 켜는 중입니다…</p></div>
         </div>
 
         <div class="toolbar">
           <button id="pauseBtn" class="primary" disabled title="화면 멈춤 / 다시 시작 (스페이스바)">멈춤</button>
+          <button id="fsBtn" title="화면을 가득 채워 보기 (F) — 아래로 쓸어내리면 돌아옵니다">⛶ 전체 화면</button>
           <button id="snapBtn" disabled title="박스가 그려진 화면을 이 기기에 저장 (S)">화면 저장</button>
           <label class="btn" for="photoIn" title="사진 파일을 같은 방식으로 판독">사진 판독
             <input type="file" id="photoIn" accept="image/*">

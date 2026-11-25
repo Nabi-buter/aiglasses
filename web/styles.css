@@ -280,3 +280,30 @@ table.log tr.chosen td { background: var(--sus-bg); font-weight: 700; }
 .share-ways h3 { margin: 0; font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tokenrow { display: grid; gap: 6px; }
 details.howto summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+
+/* ---------------- full screen camera ---------------- */
+body.fs-on { overflow: hidden; overscroll-behavior: none; }
+.stage.fs { position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100vh !important; height: 100dvh !important;
+  border-radius: 0; background: #000; touch-action: none; overscroll-behavior: none; user-select: none; -webkit-user-select: none; }
+.stage.fs .hud, .stage.fs .msg .spin { display: none; }
+.stage.fs canvas { cursor: default; }
+.stage.fs .alert { bottom: max(18px, env(safe-area-inset-bottom)); }
+.fsgrab, .fshint { display: none; }
+.stage.fs .fsgrab { display: block; position: absolute; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  width: 44px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.45); pointer-events: none; }
+.stage.fs .fshint { display: block; position: absolute; top: calc(max(8px, env(safe-area-inset-top)) + 14px); left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.65); color: #fff; font-size: 13px; padding: 6px 12px; border-radius: 999px; white-space: nowrap;
+  pointer-events: none; opacity: 0; transition: opacity .5s; }
+.stage.fs .fshint.show { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .stage.fs .fshint { transition: none; } }
+
+/* training data counts */
+#stats { display: grid; gap: 14px; }
+.stat-block { display: grid; gap: 6px; }
+.stat-block h3 { margin: 0; font-size: 14px; }
+table.counts-table { min-width: 0; max-width: 640px; }
+table.counts-table th, table.counts-table td { text-align: right; }
+table.counts-table th:first-child { text-align: left; font-weight: 600; color: var(--fg); }
+table.counts-table tr.sum td, table.counts-table tr.sum th { font-weight: 700; border-top: 2px solid var(--line); }
+table.counts-table tr.contrib td { color: var(--accent); font-weight: 600; }
+table.counts-table td.total { font-weight: 700; }

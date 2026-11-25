@@ -533,6 +533,7 @@ function renderResults(head, pAi, isAi, isReg, rows, ext) {
 /* ---------------- apply ---------------- */
 $("useHere").onclick = () => {
   if (!state.head) return;
+  setTimeout(renderStats, 0);
   try { localStorage.setItem(HEAD_KEY, JSON.stringify(state.head)); localStorage.removeItem("aiGlassesHeadPref.v1"); } catch { return notice("applyMsg", "err", "이 브라우저에 저장하지 못했습니다. ‘head.json 내려받기’ 후 판독 화면에서 ‘모델 파일 불러오기’를 쓰세요."); }
   const m = el("div", "setup");
   const a = el("a", "btn primary", "실시간 판독 화면 열기"); a.href = "./";
@@ -705,6 +706,7 @@ const submitDirect = () => withContribution(async ({ file, id, summary }) => {
   m.append(p); $("shareMsg").replaceChildren(m);
   state.lastCommit = commit.sha;
   const h = await waitForDeploy(prev, Date.now());
+  renderStats();
   if (h) {
     progress("공용 모델이 업데이트되었습니다", 1, `사용자 기여 ${h.n_contributions ?? "?"}건 반영 · 빨간 박스 기준 AI 안경 탐지 ${pct(h.cv?.at_suspect?.recall)} · 일반 안경 오탐 ${pct(h.cv?.at_suspect?.false_alarm_regular)}`);
     m.append(el("p", null, "모든 기기는 판독 화면을 새로 고치면 새 공용 모델을 씁니다."));
@@ -734,6 +736,60 @@ drop.addEventListener("drop", async (e) => {
   } else files.push(...(e.dataTransfer?.files || []));
   addFiles(files);
 });
+/* ---------------- "how much data is in the model" ---------------- */
+// Counts are photos (faces), mirrored copies not counted. Shared model = models/head.json on the site
+// (every device); device model = the one saved in this browser by "이 기기에서 바로 사용".
+const ORDER = ["ai_glasses", "regular_glasses", "no_glasses"];
+function countRow(label, counts, cls = "") {
+  const tr = el("tr", cls); tr.append(el("th", null, label));
+  let sum = 0;
+  for (const c of ORDER) { const v = counts?.[c] ?? 0; sum += v; tr.append(el("td", "mono", v.toLocaleString())); }
+  tr.append(el("td", "mono total", sum.toLocaleString()));
+  return tr;
+}
+function countTable(rows) {
+  const t = el("table", "log counts-table"), hd = el("tr");
+  hd.append(el("th"));
+  for (const c of ORDER) { const th = el("th"); th.append(el("span", "pill " + (c === AI ? "ai" : c === "regular_glasses" ? "ok" : "na"), NAMES[c])); hd.append(th); }
+  hd.append(el("th", null, "합계"));
+  t.append(hd);
+  for (const r of rows) t.append(r);
+  return t;
+}
+const when = (iso) => { try { return new Date(iso).toLocaleString("ko-KR"); } catch { return iso || ""; } };
+async function renderStats() {
+  const box = $("stats");
+  let shared = null, device = null;
+  try { shared = await (await fetch(`models/head.json?t=${Date.now()}`, { cache: "no-store" })).json(); } catch {}
+  try { device = JSON.parse(localStorage.getItem(HEAD_KEY) || "null"); } catch {}
+  box.replaceChildren();
+  if (shared?.n_images) {
+    const contrib = shared.n_contrib || {};
+    const pub = shared.n_public || shared.n_images;
+    const sec = el("div", "stat-block");
+    sec.append(el("h3", null, "공용 모델 (모든 기기에 적용)"));
+    const rows = [countRow("공개 기본 데이터", pub), countRow(`사용자 기여 ${shared.n_contributions ?? 0}건`, contrib, "contrib"), countRow("합계", shared.n_images, "sum")];
+    sec.append(countTable(rows));
+    const a = shared.cv?.at_suspect;
+    sec.append(el("p", "hint", `학습 시각 ${when(shared.trained_at)}` +
+      (a ? ` · 빨간 박스 기준 AI 안경 탐지 ${pct(a.recall)} · 일반 안경 오탐 ${pct(a.false_alarm_regular ?? a.false_alarm)}` : "") +
+      (shared.n_contributions ? "" : " · 아직 사용자 기여가 반영되지 않았습니다")));
+    box.append(sec);
+  } else box.append(el("p", "hint", "배포된 공용 모델 정보를 읽지 못했습니다."));
+  if (device?.n_images) {
+    const sec = el("div", "stat-block");
+    const newer = shared && Date.parse(shared.trained_at) > Date.parse(device.trained_at);
+    sec.append(el("h3", null, "이 기기에서 학습한 모델 (이 브라우저만)" + (newer ? " — 공용 모델이 더 최신이라 판독 화면은 공용 모델을 씁니다" : "")));
+    const rows = [];
+    if (device.n_user) rows.push(countRow("직접 넣은 사진", device.n_user, "contrib"));
+    if (device.n_base) rows.push(countRow("함께 쓴 공용 데이터", device.n_base));
+    rows.push(countRow("합계", device.n_images, "sum"));
+    sec.append(countTable(rows));
+    sec.append(el("p", "hint", `학습 시각 ${when(device.trained_at)}`));
+    box.append(sec);
+  }
+}
+$("statsRefresh").onclick = renderStats;
 window.__train = state;
 $("withBase").onchange = () => renderData();
 $("consent").onchange = () => renderData();
@@ -743,6 +799,7 @@ $("tokenSave").onclick = saveToken;
 $("tokenForget").onclick = forgetToken;
 $("tokenIn").addEventListener("keydown", (e) => { if (e.key === "Enter") saveToken(); });
 renderData();
+renderStats();
 loadBase().then((b) => {
   if (!b) { $("withBase").checked = false; $("withBase").disabled = true; $("withBaseText").textContent = "기본 공개 데이터 없음 (이 배포에 포함되지 않음)"; }
   else $("withBaseText").textContent = `기본 공개 데이터도 함께 학습 (권장) — ${Object.entries(b.photos).map(([c, n]) => `${NAMES[c]} ${n.toLocaleString()}`).join(" · ")}`;

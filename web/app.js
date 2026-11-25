@@ -385,14 +385,15 @@ function render() {
   if (!src || !src.width || (state.mode === "live" && !state.stream)) { c.hidden = true; $("stage").style.height = ""; $("modeTag").hidden = true; return; }
   c.hidden = false;
   const stage = $("stage");
-  const maxH = Math.max(260, window.innerHeight * 0.72);
+  // Full screen: the whole frame fitted into the whole screen (nothing cropped, widest view).
+  const maxH = state.fs ? stage.clientHeight : Math.max(260, window.innerHeight * 0.72);
   let W = stage.clientWidth, H = W * src.height / src.width;
   if (H > maxH) { H = maxH; W = H * src.width / src.height; }
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const bw = Math.round(W * dpr), bh = Math.round(H * dpr);
   if (c.width !== bw || c.height !== bh) { c.width = bw; c.height = bh; }
   c.style.width = W + "px"; c.style.height = H + "px";
-  stage.style.height = H + "px";
+  if (!state.fs) stage.style.height = H + "px";
   const ctx = c.getContext("2d");
   drawScene(ctx, src, bw, bh, currentTracks(), {
     mirror: mirrored(), selected: state.selectedId, unit: dpr,
@@ -712,7 +713,7 @@ $("liveBtn").onclick = backToLive;
 $("flipBtn").onclick = () => { state.facing = state.facing === "environment" ? "user" : "environment"; startCamera(); };
 $("retryCam").onclick = startCamera;
 $("zoom").oninput = (e) => { state.zoom = Number(e.target.value) || 1; applyZoom(); };
-$("view").addEventListener("click", (ev) => { const t = hitTest(ev); state.selectedId = t ? t.id : null; state.dirty = true; renderPeople(); });
+$("view").addEventListener("click", (ev) => { if (performance.now() - (state.swipedAt || 0) < 400) return; const t = hitTest(ev); state.selectedId = t ? t.id : null; state.dirty = true; renderPeople(); });
 $("clearLog").onclick = askClear;
 $("exportCsv").onclick = exportCsv;
 $("headFile").onchange = (e) => { if (e.target.files[0]) loadHeadFile(e.target.files[0]); e.target.value = ""; };
@@ -732,10 +733,54 @@ window.addEventListener("beforeunload", (e) => {
   if (state.collect.items.length > (state.collect.exported || 0)) { e.preventDefault(); e.returnValue = ""; }
 });
 window.addEventListener("resize", () => (state.dirty = true));
+
+/* ---------------- full screen ---------------- */
+// No buttons in full screen: swipe (or drag) down to leave; Esc / F on a keyboard.
+// iPhone Safari has no element fullscreen, so the stage simply covers the page there.
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+async function enterFs() {
+  if (state.fs) return;
+  state.fs = true;
+  document.body.classList.add("fs-on"); $("stage").classList.add("fs");
+  const st = $("stage");
+  try {
+    if (st.requestFullscreen) await st.requestFullscreen({ navigationUI: "hide" });
+    else if (st.webkitRequestFullscreen) st.webkitRequestFullscreen();
+  } catch { /* covered by CSS instead */ }
+  const h = $("fsHint"); h.classList.add("show");
+  clearTimeout(enterFs.t); enterFs.t = setTimeout(() => h.classList.remove("show"), 2600);
+  state.dirty = true;
+}
+function exitFs() {
+  if (!state.fs) return;
+  state.fs = false;
+  document.body.classList.remove("fs-on"); $("stage").classList.remove("fs"); $("fsHint").classList.remove("show");
+  if (fsElement()) (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {});
+  state.dirty = true;
+}
+for (const ev of ["fullscreenchange", "webkitfullscreenchange"])
+  document.addEventListener(ev, () => { if (!fsElement() && state.fs) exitFs(); state.dirty = true; });
+$("fsBtn").onclick = enterFs;
+(() => {
+  const st = $("stage");
+  let start = null;
+  // e.timeStamp = when the finger moved, not when the (busy) main thread got to it
+  st.addEventListener("pointerdown", (e) => { if (state.fs) start = { x: e.clientX, y: e.clientY, t: e.timeStamp }; });
+  st.addEventListener("pointercancel", () => (start = null));
+  st.addEventListener("pointerup", (e) => {
+    if (!state.fs || !start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y, dt = e.timeStamp - start.t;
+    start = null;
+    if (dy > Math.max(70, window.innerHeight * 0.1) && Math.abs(dx) < dy * 0.7 && dt < 3000) { state.swipedAt = performance.now(); exitFs(); }
+  });
+  st.addEventListener("dblclick", (e) => { if (!state.fs) { e.preventDefault(); enterFs(); } });
+})();
 document.addEventListener("keydown", (e) => {
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) return;
   if (e.code === "Space" && state.mode === "live" && state.stream) { e.preventDefault(); $("pauseBtn").click(); }
   if (e.key === "s" || e.key === "S") { if (!$("snapBtn").disabled) snapshot(); }
+  if (e.key === "f" || e.key === "F") { state.fs ? exitFs() : enterFs(); }
+  if (e.key === "Escape" && state.fs) exitFs();
   if (e.key === "Escape" && state.mode === "photo") backToLive();
 });
 document.addEventListener("paste", (e) => { const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith("image/")); if (f) openPhoto(f); });
