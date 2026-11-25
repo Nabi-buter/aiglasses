@@ -100,6 +100,21 @@ def extract_all(items, data: Path, model_dir: Path, flip: bool):
     return np.asarray(X, np.float32), np.asarray(y), np.asarray(groups), skipped
 
 
+def load_base(models: Path):
+    """web/models/base_data.{json,bin}: int8 features × per-row scale (see build_base.py)."""
+    meta = json.loads((models / "base_data.json").read_text())
+    if meta["crop"] != gf.CROP_VERSION or meta["dim"] != gf.FEATURE_DIM:
+        sys.exit("base_data 의 crop 버전/차원이 코드와 다릅니다. build_base.py 로 다시 만드세요.")
+    raw = (models / "base_data.bin").read_bytes()
+    n, d = meta["n"], meta["dim"]
+    q = np.frombuffer(raw, np.int8, n * d).reshape(n, d).astype(np.float32)
+    scale = np.frombuffer(raw, np.float32, n, offset=n * d)
+    X = q * scale[:, None]
+    y = np.array([meta["classes"][i] for i in meta["y"]])
+    groups = np.array(["base:" + meta["groups"][g] for g in meta["group"]])
+    return X, y, groups
+
+
 def make_model(C: float) -> LogisticRegression:
     return LogisticRegression(C=C, max_iter=5000, class_weight="balanced")
 
@@ -165,6 +180,8 @@ def main():
     ap.add_argument("--target-recall", type=float,
                     help="교차검증에서 AI 안경 사진의 이 비율 이상을 빨간 박스로 잡도록 의심 기준을 자동으로 정합니다 (예: 0.95)")
     ap.add_argument("--note", default="", help="head.json 에 남길 메모 (데이터 출처 등)")
+    ap.add_argument("--with-base", action="store_true",
+                    help="web/models/base_data.* (기본 공개 데이터 특징값)을 직접 모은 사진과 함께 학습 (웹 학습 페이지의 기본값과 같음)")
     ap.add_argument("--test", type=Path, help="학습에 쓰지 않은 별도 평가 폴더 (같은 구조). 다른 날·다른 사람 사진 권장")
     args = ap.parse_args()
 
@@ -181,9 +198,17 @@ def main():
     if skipped:
         print(f"  ! 얼굴을 찾지 못해 {len(skipped)}장을 뺐습니다 (예: {skipped[0]})")
 
+    if args.with_base:
+        bX, by, bg = load_base(args.models)
+        X, y, groups = np.concatenate([X, bX]), np.concatenate([y, by]), np.concatenate([groups, bg])
+        print(f"기본 공개 데이터 {len(by)}행 추가")
     classes = sorted(set(y.tolist()))
     used = {str(p) for p, _ in items} - {str(p) for p in skipped}
     counts = {c: sum(1 for p, l in items if l == c and str(p) in used) for c in classes}
+    if args.with_base:
+        meta = json.loads((args.models / "base_data.json").read_text())
+        for i, c in enumerate(meta["classes"]):
+            counts[c] = counts.get(c, 0) + sum(1 for yy, fl in zip(meta["y"], meta["flip"]) if yy == i and not fl)
     print("학습에 쓰는 원본 사진 수:", counts, f"· 묶음(사람/세션) {len(set(groups))}개")
     if min(counts.values()) < 5:
         sys.exit("클래스마다 얼굴이 보이는 사진이 최소 5장은 있어야 합니다. 권장은 클래스당 200장 이상입니다.")

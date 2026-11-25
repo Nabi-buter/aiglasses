@@ -15,7 +15,30 @@ const C_GRID = [0.1, 0.3, 1.0, 3.0, 10.0];   // == train.py
 const HEAD_KEY = "aiGlassesCustomHead.v1";   // == app.js: the live view picks it up
 const D = 2560;
 
-const state = { items: new Map(), head: null, running: false, abort: false, workers: [], detector: null, rows: null };
+const state = { items: new Map(), head: null, running: false, abort: false, workers: [], detector: null, rows: null, base: undefined };
+
+/* ---------------- base data (shipped with the app: features only, no photos) ---------------- */
+async function loadBase() {
+  if (state.base !== undefined) return state.base;
+  try {
+    const [m, buf] = await Promise.all([
+      fetch("models/base_data.json").then((r) => (r.ok ? r.json() : null)),
+      fetch("models/base_data.bin").then((r) => (r.ok ? r.arrayBuffer() : null)),
+    ]);
+    if (!m || !buf || m.crop !== CROP_VERSION || m.dim !== D || buf.byteLength < m.n * (D + 4)) return (state.base = null);
+    const q = new Int8Array(buf, 0, m.n * D), sc = new Float32Array(buf.slice(m.n * D, m.n * D + 4 * m.n));
+    const rows = [];
+    for (let i = 0; i < m.n; i++) {
+      const feat = new Float32Array(D);
+      for (let j = 0; j < D; j++) feat[j] = q[i * D + j] * sc[i];
+      rows.push({ feat, label: m.classes[m.y[i]], group: "base:" + m.groups[m.group[i]], item: null, flip: !!m.flip[i], base: true, source: m.sources[m.source[i]] });
+    }
+    const photos = {};
+    rows.forEach((r) => { if (!r.flip) photos[r.label] = (photos[r.label] || 0) + 1; });
+    return (state.base = { meta: m, rows, photos });
+  } catch (e) { console.warn("base data:", e); return (state.base = null); }
+}
+const useBase = () => $("withBase").checked && !!state.base;
 
 /* ---------------- utils ---------------- */
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -100,7 +123,7 @@ function renderData(errors = []) {
   const box = $("dataSummary"); box.replaceChildren();
   const by = summary(), total = state.items.size;
   $("clearData").disabled = !total || state.running;
-  $("trainBtn").disabled = state.running || !REQUIRED.every((c) => by[c]?.n >= 5);
+  $("trainBtn").disabled = state.running || (useBase() ? total < 5 : !REQUIRED.every((c) => by[c]?.n >= 5));
   if (!total) {
     if (errors.length) box.append(el("div", "err", errors.join("\n")));
     return;
@@ -120,11 +143,12 @@ function renderData(errors = []) {
   t.append(body); box.append(t);
 
   const warn = [];
-  for (const c of REQUIRED) if (!(by[c]?.n >= 5)) warn.push(`${NAMES[c]} 사진이 5장 이상 필요합니다.`);
-  for (const c of REQUIRED) if (by[c] && by[c].groups.size < 2) warn.push(`${NAMES[c]}: 서로 다른 사람/세션이 2개 이상 필요합니다 (파일 이름 앞부분 'p01__' 처럼).`);
+  if (useBase()) { if (total < 5) warn.push("사진이 5장 이상 필요합니다."); }
+  else for (const c of REQUIRED) if (!(by[c]?.n >= 5)) warn.push(`${NAMES[c]} 사진이 5장 이상 필요합니다 (또는 ‘기본 공개 데이터도 함께 학습’을 켜세요).`);
+  if (!useBase()) for (const c of REQUIRED) if (by[c] && by[c].groups.size < 2) warn.push(`${NAMES[c]}: 서로 다른 사람/세션이 2개 이상 필요합니다 (파일 이름 앞부분 'p01__' 처럼).`);
   const small = Math.min(...REQUIRED.map((c) => by[c]?.n || 0));
   if (small >= 5 && small < 200) warn.push(`사진이 적습니다. 실전에 쓰려면 클래스당 200장 이상, 사람 30명 이상을 권장합니다.`);
-  if (!by.no_glasses) warn.push("‘안경 없음’ 사진이 없습니다. 넣지 않으면 안경을 안 쓴 사람도 AI 안경·일반 안경 중 하나로 표시됩니다.");
+  if (!by.no_glasses && !useBase()) warn.push("‘안경 없음’ 사진이 없습니다. 넣지 않으면 안경을 안 쓴 사람도 AI 안경·일반 안경 중 하나로 표시됩니다.");
   if (state.unlabeled) warn.push(`정답 폴더(ai_glasses 등) 밖에 있는 사진 ${state.unlabeled}장은 건너뛰었습니다.`);
   for (const w of warn) box.append(el("div", "warnbox", w));
   if (errors.length) box.append(el("div", "err", errors.join("\n")));
@@ -240,11 +264,15 @@ async function train() {
   $("resultPanel").hidden = true; $("applyPanel").hidden = true; $("applyMsg").replaceChildren();
   try {
     const ext = await extractAll(flip);
-    const rows = ext.rows;
+    const withBase = useBase();
+    if (!ext.rows.length) throw new Error("넣은 사진에서 얼굴을 하나도 찾지 못했습니다.");
+    const rows = withBase ? ext.rows.concat(state.base.rows) : ext.rows;
     const classes = KNOWN.filter((c) => rows.some((r) => r.label === c));
     for (const c of REQUIRED) if (!classes.includes(c)) throw new Error(`${NAMES[c]} 사진에서 얼굴을 찾지 못했습니다.`);
     const k = classes.length, n = rows.length;
-    const counts = Object.fromEntries(classes.map((c) => [c, new Set(rows.filter((r) => r.label === c).map((r) => r.item.key)).size]));
+    const userCounts = Object.fromEntries(classes.map((c) => [c, new Set(ext.rows.filter((r) => r.label === c).map((r) => r.item.key)).size]));
+    const baseCounts = withBase ? Object.fromEntries(classes.map((c) => [c, state.base.photos[c] || 0])) : null;
+    const counts = Object.fromEntries(classes.map((c) => [c, userCounts[c] + (baseCounts?.[c] || 0)]));
     if (Math.min(...Object.values(counts)) < 5) throw new Error("클래스마다 얼굴이 보이는 사진이 최소 5장은 있어야 합니다.");
     const groupsPer = classes.map((c) => new Set(rows.filter((r) => r.label === c).map((r) => r.group)).size);
     const nFolds = Math.min(5, ...groupsPer);
@@ -307,6 +335,16 @@ async function train() {
       confusion: cm, folds: nFolds, ai_auc: auc == null ? null : r4(auc),
       at_suspect: ratesAt(suspect, pAi, isAi, isReg), at_ai: ratesAt(aiT, pAi, isAi, isReg),
     };
+    if (withBase) {
+      // The numbers that matter most: how the merged model does on YOUR photos (held out by person).
+      const u = rows.map((r) => !r.base);
+      const uIdx = [...u.keys()].filter((i) => u[i]);
+      const sub = (a) => uIdx.map((i) => a[i]);
+      cv.user = {
+        n: uIdx.length, accuracy: r4(uIdx.filter((i) => best.pred[i] === y[i]).length / Math.max(1, uIdx.length)),
+        at_suspect: ratesAt(suspect, sub(pAi), sub(isAi), sub(isReg)),
+      };
+    }
 
     // Final model on everything
     progress("③ 전체 사진으로 최종 모델 학습 중", 0.985, "");
@@ -319,7 +357,8 @@ async function train() {
       W: fitted.W.map((row) => row.map((v) => Math.round(v * 1e6) / 1e6)), b: fitted.b.map((v) => Math.round(v * 1e6) / 1e6),
       thresholds: { ai: aiT, suspect: r4(suspect) }, C: best.C,
       trained_at: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"),
-      n_images: counts, cv, test: null, note: $("note").value.trim(), trainer: "browser",
+      n_images: counts, n_user: userCounts, n_base: baseCounts, cv, test: null, note: $("note").value.trim(), trainer: "browser",
+      base_data: withBase ? state.base.meta.trained_head_at : null,
     });
     state.head = head;
     state.rows = { rows, pAi, isAi, classes };
@@ -362,6 +401,16 @@ function renderResults(head, pAi, isAi, isReg, rows, ext) {
     ["AUC", head.cv.ai_auc == null ? "—" : head.cv.ai_auc.toFixed(3), "1에 가까울수록 AI 안경을 잘 구분"],
   ]) { const c = el("div", "card"); c.append(el("span", "ck", k), el("b", "cv mono", val), el("span", "cs", sub)); cards.append(c); }
   box.append(cards);
+  if (head.cv.user) {
+    const u = head.cv.user, cu = el("div", "cards");
+    for (const [k, val, sub] of [
+      ["내 사진: AI 안경 탐지율", u.at_suspect.recall == null ? "—" : pct(u.at_suspect.recall, 1), "직접 넣은 AI 안경 사진 기준"],
+      ["내 사진: 일반 안경 오탐률", pct(u.at_suspect.false_alarm_regular ?? u.at_suspect.false_alarm, 1), "직접 넣은 일반 안경 사진 기준"],
+      ["내 사진: 정확도", pct(u.accuracy, 1), `${u.n}개 얼굴 (반전 포함)`],
+    ]) { const c = el("div", "card mine"); c.append(el("span", "ck", k), el("b", "cv mono", val), el("span", "cs", sub)); cu.append(c); }
+    box.append(cu);
+    box.append(el("p", "hint", `기본 공개 데이터(${Object.entries(head.n_base).map(([c, n]) => `${NAMES[c]} ${n}`).join(" · ")})와 직접 넣은 사진(${Object.entries(head.n_user).map(([c, n]) => `${NAMES[c]} ${n}`).join(" · ")})을 함께 학습했습니다. 위 카드는 전체, 아래 카드는 직접 넣은 사진만의 성능입니다.`));
+  }
   box.append(el("p", "hint", `${head.cv.folds}겹 교차검증, 같은 사람의 사진은 학습과 시험에 나뉘지 않게 묶었습니다. 사진 1장 기준 수치이며, 실시간 화면은 여러 프레임을 평균하므로 보통 더 좋습니다. 학습 사진: ${Object.entries(head.n_images).map(([c, n]) => `${NAMES[c]} ${n}`).join(" · ")}`));
 
   // confusion matrix
@@ -393,7 +442,7 @@ function renderResults(head, pAi, isAi, isReg, rows, ext) {
 
   // mistakes
   const susT = a.threshold;
-  const orig = rows.map((r, i) => ({ r, p: pAi[i], ai: isAi[i] })).filter((x) => !x.r.flip);
+  const orig = rows.map((r, i) => ({ r, p: pAi[i], ai: isAi[i] })).filter((x) => !x.r.flip && x.r.item);
   const missed = orig.filter((x) => x.ai && x.p < susT).sort((p, q) => p.p - q.p).slice(0, 12);
   const falseA = orig.filter((x) => !x.ai && x.p >= susT).sort((p, q) => q.p - p.p).slice(0, 12);
   for (const [title2, list, hint] of [
@@ -452,4 +501,10 @@ drop.addEventListener("drop", async (e) => {
   addFiles(files);
 });
 window.__train = state;
+$("withBase").onchange = () => renderData();
 renderData();
+loadBase().then((b) => {
+  if (!b) { $("withBase").checked = false; $("withBase").disabled = true; $("withBaseText").textContent = "기본 공개 데이터 없음 (이 배포에 포함되지 않음)"; }
+  else $("withBaseText").textContent = `기본 공개 데이터도 함께 학습 (권장) — ${Object.entries(b.photos).map(([c, n]) => `${NAMES[c]} ${n.toLocaleString()}`).join(" · ")}`;
+  renderData();
+});

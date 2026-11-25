@@ -63,6 +63,8 @@
       </label>
     </div>
     <label class="tog"><input type="checkbox" id="flip" checked> 좌우 반전 사진도 함께 학습 (권장)</label>
+    <label class="tog"><input type="checkbox" id="withBase" checked> <span id="withBaseText">기본 공개 데이터도 함께 학습 (권장)</span></label>
+    <p class="hint" id="baseHint">기본 공개 데이터는 앱에 들어 있는 공개 사진(Open Images, Wikimedia Commons)의 특징값입니다(사진은 없음). 직접 모은 사진과 합쳐 학습하므로 사진이 적어도 세 가지 판정이 모두 나오고, 모을수록 직접 찍은 조건에 맞게 좋아집니다.</p>
     <div class="controls">
       <button class="primary" id="trainBtn" disabled>학습 시작</button>
       <button class="ghost" id="stopBtn" hidden>중지</button>

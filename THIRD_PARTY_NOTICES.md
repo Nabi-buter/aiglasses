@@ -25,3 +25,10 @@ The README screenshot shows the astronaut photo bundled with scikit-image (Eilee
 
 Weights learned by `training/build_presence.py` from Open Images V7 (https://storage.googleapis.com/openimages/web/index.html).
 Annotations © Google LLC, licensed under CC BY 4.0. Images are listed as having a CC BY 2.0 license; no images are redistributed here, only model weights.
+
+## web/models/head.json, web/models/base_data.*
+
+The base model and base feature set are computed from Open Images V7 (as above) and from freely licensed
+Wikimedia Commons photos (CC0 / CC BY / CC BY-SA / public domain). Author and license of every Commons file
+are listed in [docs/BASE_DATA_SOURCES.md](docs/BASE_DATA_SOURCES.md). No images are redistributed here,
+only numeric features and model weights.

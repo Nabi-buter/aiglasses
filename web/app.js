@@ -1,4 +1,4 @@
-import { Detector, blobToCanvas, validateHead, validatePresence, scoreFace, decide, shownProb, GLASSES_KEY } from "./pipeline.js";
+import { Detector, blobToCanvas, validateHead, validatePresence, scoreFace, decide, shownProb, displayProbs, GLASSES_KEY } from "./pipeline.js";
 import { Tracker } from "./tracker.js";
 import { makeZip } from "./zip.js";
 
@@ -106,8 +106,9 @@ function useHead(head, source) {
   if (head) setSvc("ok", "판독 준비 완료 · 기기 안에서 실행");
   else if (state.presence) setSvc("warn", "AI 안경 판독 모델 없음 · 안경 유무만 판독");
   else setSvc("bad", "학습된 판독 모델이 없습니다 · 안경 영역만 표시");
-  $("noModelTag").hidden = !!head;
-  $("noModelTag").textContent = state.presence ? "AI 안경 판독 모델 없음 · 안경 착용 여부만 표시" : "판독 모델 없음 · 얼굴의 안경 위치만 표시";
+  $("noModelTag").hidden = !!head && !head.base;
+  $("noModelTag").textContent = head?.base ? "기본 모델(공개 데이터·기초 수준)로 판독 중 · 직접 모은 사진으로 학습하면 정확해집니다"
+    : state.presence ? "AI 안경 판독 모델 없음 · 안경 착용 여부만 표시" : "판독 모델 없음 · 얼굴의 안경 위치만 표시";
   $("resetHead").hidden = source !== "custom";
   renderModelInfo();
   if (state.mode === "photo" && state.photo) analyzePhoto(state.photo.canvas);
@@ -135,7 +136,14 @@ function renderModelInfo() {
   }
   const dl = el("dl");
   const add = (k, v) => { if (v == null || v === "") return; dl.append(el("dt", null, k), el("dd", null, String(v))); };
-  add("출처", state.headSource === "custom" ? "직접 불러온 파일 (이 브라우저에 저장됨)" : "기본 포함 모델");
+  add("출처", (state.headSource === "custom" ? "직접 불러온 파일 (이 브라우저에 저장됨)" : "배포에 포함된 모델") +
+    (h.base ? " · 기본 모델 (공개 데이터만으로 학습한 기초 수준)" : h.base_data ? " · 기본 공개 데이터 + 직접 모은 사진" : ""));
+  if (h.n_user) add("직접 모은 사진", Object.entries(h.n_user).map(([c, n]) => `${CLASS_NAMES[c] || c} ${n}`).join(" · "));
+  if (h.cv?.user?.at_suspect) add("내 사진 기준 성능", `AI 안경 탐지 ${pct(h.cv.user.at_suspect.recall)} · 일반 안경 오탐 ${pct(h.cv.user.at_suspect.false_alarm_regular ?? h.cv.user.at_suspect.false_alarm)}`);
+  if (h.cv?.ai_recall_by_device) {
+    const DEV = { google_glass: "Google Glass", rayban_meta: "Ray-Ban Meta", rayban_stories: "Ray-Ban Stories", spectacles: "Snap Spectacles", other_smart: "기타 스마트 안경" };
+    add("기종별 AI 안경 탐지", Object.entries(h.cv.ai_recall_by_device).map(([d, r]) => `${DEV[d] || d} ${pct(r)}`).join(" · "));
+  }
   add("클래스", h.classes.map((c) => CLASS_NAMES[c] || c).join(", "));
   if (h.n_images) add("학습 사진", Object.entries(h.n_images).map(([c, n]) => `${CLASS_NAMES[c] || c} ${n}`).join(" · "));
   if (h.cv) add("교차검증", `정확도 ${pct(h.cv.accuracy)} · AI 안경 재현율 ${pct(h.cv.ai_recall)} · 정밀도 ${pct(h.cv.ai_precision)}` + (h.cv.ai_auc != null ? ` · AUC ${h.cv.ai_auc.toFixed(3)}` : ""));
@@ -239,7 +247,7 @@ function classifyTrack(t, canvas, now) {
   state.tracker.addSample(t, probs, now);
   t.crops = r.crops; t.cropAt = now;
   t.verdict = decide(state.head, state.presence, t.probs);
-  if (t.stable && state.head) t.maxAi = Math.max(t.maxAi || 0, t.probs[state.head.ai_class] ?? 0);
+  if (t.stable && state.head) t.maxAi = Math.max(t.maxAi || 0, displayProbs(state.head, t.probs)[state.head.ai_class] ?? 0);
   if (t.stable && isFlag(t.verdict) && !t.flagged) { t.flagged = true; onFlag(t); }
 }
 
@@ -247,7 +255,7 @@ function onFlag(t) {
   addLog(t, "live", "auto");
   const meta = VERDICTS[t.verdict];
   const b = $("alertBanner");
-  b.textContent = `${meta.label} 감지 · #${t.id} · AI 확률 ${pct(t.probs[state.head.ai_class])} — 안경을 직접 확인하세요`;
+  b.textContent = `${meta.label} 감지 · #${t.id} · AI 확률 ${pct(displayProbs(state.head, t.probs)[state.head.ai_class])} — 안경을 직접 확인하세요`;
   b.hidden = false;
   clearTimeout(onFlag.timer); onFlag.timer = setTimeout(() => (b.hidden = true), 5000);
   if (state.selectedId == null) state.selectedId = t.id;
@@ -432,8 +440,9 @@ function renderDetail(t) {
     const wrap = el("div", "probs");
     const bars = [];
     if (state.presence && t.probs[GLASSES_KEY] != null) bars.push(["안경 착용 (기본 모델)", t.probs[GLASSES_KEY], "det"]);
+    const dp = displayProbs(state.head, t.probs);
     if (state.head) for (const c of [...state.head.classes].sort((a, b) => (a === state.head.ai_class ? -1 : b === state.head.ai_class ? 1 : a.localeCompare(b))))
-      bars.push([CLASS_NAMES[c] || c, t.probs[c], c === state.head.ai_class ? "ai" : c === "regular_glasses" ? "reg" : "na"]);
+      bars.push([CLASS_NAMES[c] || c, dp[c], c === state.head.ai_class ? "ai" : c === "regular_glasses" ? "reg" : "na"]);
     for (const [name, v, cls] of bars) {
       const row = el("div", "prow " + cls);
       const bar = el("div", "pb"), fill = el("i"); fill.style.width = pct(v); bar.append(fill);
@@ -441,6 +450,7 @@ function renderDetail(t) {
       wrap.append(row);
     }
     box.append(wrap);
+    if (state.head) box.append(el("p", "hint", "AI 안경 확률은 빨간 박스 기준선이 50%가 되도록 맞춘 값입니다 (50% 이상이면 빨간 박스)."));
     if (state.mode === "live") box.append(el("p", "hint", `최근 ${t.samples.length}개 프레임 평균${t.stable ? "" : " · 아직 판정이 안정되지 않았습니다"}${t.maxAi ? ` · 지금까지 최고 AI 확률 ${pct(t.maxAi)}` : ""}`));
     const steps = VERDICTS[t.verdict]?.steps || [];
     if (steps.length) { const ol = el("ol", "steps"); steps.forEach((x) => ol.append(el("li", null, x))); box.append(ol); }
@@ -527,7 +537,7 @@ function addLog(t, src, how) {
   if (!state.head || !t.probs) return;
   state.log.unshift({
     ts: Date.now(), seat: how === "manual" || state.selectedId === t.id ? $("seat").value.trim().slice(0, 40) : "",
-    room: $("room").value.trim().slice(0, 40), verdict: t.verdict, pAi: t.probs[state.head.ai_class] ?? null,
+    room: $("room").value.trim().slice(0, 40), verdict: t.verdict, pAi: displayProbs(state.head, t.probs)[state.head.ai_class] ?? null,
     thumb: t.crops?.band ? thumb(t.crops.band, 160) : null, src, id: t.id, n: t.samples?.length || 1,
   });
   state.log = state.log.slice(0, 120);

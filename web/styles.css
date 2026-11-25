@@ -269,3 +269,4 @@ table.log tr.chosen td { background: var(--sus-bg); font-weight: 700; }
 .gallery canvas { width: 100%; height: auto; aspect-ratio: 4 / 3; background: var(--surface-2); border-radius: 6px; border: 1px solid var(--line); }
 .gallery figcaption { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toplinks { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.card.mine { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }

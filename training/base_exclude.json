@@ -1,0 +1,13 @@
+{
+  "note": "Wikimedia Commons files removed after looking at the face crops (build_base.py --review-sheet). Reason per file.",
+  "reasons": {
+    "File:Isabelle Olsson (cropped).jpg": "too blurry, glasses not visible",
+    "File:MannGlas and GoogleGlass1 crop.jpg": "face crop does not show the glasses",
+    "File:Meta Glasses - 4.jpg": "product photo, glasses not worn",
+    "File:QuantimetricSelfSensingPrototypeMann1996.jpg": "1996 lab apparatus, not representative",
+    "File:Ransom Canyon Texas Vogue Magazine Photo Shoot-cropped.jpg": "too dark and blurry",
+    "File:Steve Mann.jpg": "glasses not visible on the detected face",
+    "File:SteveMann 30 years of WearableComputing and AR in everyday life (cropped).png": "glasses not visible on the detected face",
+    "File:SteveMann 30 years of WearableComputing and AR in everyday life 1 (cropped).png": "glasses not visible on the detected face"
+  }
+}

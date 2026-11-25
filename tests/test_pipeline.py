@@ -136,6 +136,11 @@ def main():
             print(f"browser training: {tb['secs']:.0f}s  C={hb['C']}  cv acc={hb['cv']['accuracy']}  "
                   f"auc={hb['cv']['ai_auc']}  suspect={hb['thresholds']['suspect']}")
             assert hb["cv"]["accuracy"] >= 0.9 and hb["classes"] == head["classes"], hb["cv"]
+            if tb.get("merged"):
+                m = tb["merged"]
+                print(f"  + base data merged: base {m['n_base']} / user {m['n_user']}  "
+                      f"user-photo accuracy {m['cv']['user']['accuracy']}  overall {m['cv']['accuracy']}")
+                assert m["cv"]["user"]["accuracy"] >= 0.8, m["cv"]["user"]
             if hb["C"] == head["C"]:   # same C -> the final models must agree (features from Python)
                 feats = np.stack([ex.feature for ex, _ in py.values()])
                 def proba(h):

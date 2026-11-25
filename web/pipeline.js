@@ -231,10 +231,27 @@ export function decide(head, presence, p) {
 /** The probability shown next to a verdict. */
 export function shownProb(head, verdict, p) {
   if (!p) return null;
+  p = displayProbs(head, p);
   switch (verdict) {
     case "GLASSES": return p[GLASSES_KEY];
     case "NO_GLASSES": return head?.classes.includes("no_glasses") ? p.no_glasses : 1 - (p[GLASSES_KEY] ?? 0);
     case "REGULAR": return p.regular_glasses;
     default: return head ? p[head.ai_class] : null;
   }
+}
+
+/**
+ * Probabilities for DISPLAY: the AI probability is re-scaled so that the red-box line
+ * (head.thresholds.suspect) sits at exactly 50%, and the other classes share the rest in
+ * the same proportions. Verdicts and thresholds are unchanged; only the numbers people read are.
+ * Without this a rare-class model can show a red box with "12%", which reads as a contradiction.
+ */
+export function displayProbs(head, p) {
+  if (!head || !p || p[head.ai_class] == null) return p;
+  const t = Math.min(0.99, Math.max(0.01, head.thresholds?.suspect ?? 0.3));
+  const k = (1 - t) / t, a = p[head.ai_class];
+  const a2 = (a * k) / (a * k + (1 - a));
+  const rest = 1 - a, out = { ...p };
+  for (const c of head.classes) out[c] = c === head.ai_class ? a2 : rest > 0 ? (p[c] / rest) * (1 - a2) : 0;
+  return out;
 }
