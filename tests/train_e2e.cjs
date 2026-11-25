@@ -42,6 +42,13 @@ const { chromium } = require("playwright");
     merged = { n_base: h2.n_base, n_user: h2.n_user, cv: h2.cv };
     await page.waitForTimeout(500);
   }
+  // Contribution file for the shared model (features only).
+  await page.check("#consent");
+  const [cdl] = await Promise.all([page.waitForEvent("download", { timeout: 600000 }), page.click("#makeShare")]);
+  const contribPath = (shot || "/tmp/aiglasses-e2e.png").replace(/\.png$/, "_" + cdl.suggestedFilename());
+  await cdl.saveAs(contribPath);
+  const uploadHref = await page.getAttribute("#uploadLink", "href");
+  await page.waitForTimeout(300);
   if (shot) await page.screenshot({ path: shot, fullPage: true });
 
   // Use it on this device, then the live page must pick it up.
@@ -53,6 +60,6 @@ const { chromium } = require("playwright");
   if (live.source !== "custom" || live.trained_at !== applied) throw new Error("live page did not load the trained model: " + JSON.stringify(live));
   const bad = errors.filter((e) => !e.startsWith("INFO:") && !/head\.json|404/.test(e));
   if (bad.length) throw new Error("page errors: " + bad.join(" | "));
-  process.stdout.write(JSON.stringify({ head, secs, live, merged }));
+  process.stdout.write(JSON.stringify({ head, secs, live, merged, contribution: contribPath, uploadHref }));
   await browser.close();
 })().catch((e) => { console.error(e); process.exit(1); });

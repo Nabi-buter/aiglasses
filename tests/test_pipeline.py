@@ -136,6 +136,12 @@ def main():
             print(f"browser training: {tb['secs']:.0f}s  C={hb['C']}  cv acc={hb['cv']['accuracy']}  "
                   f"auc={hb['cv']['ai_auc']}  suspect={hb['thresholds']['suspect']}")
             assert hb["cv"]["accuracy"] >= 0.9 and hb["classes"] == head["classes"], hb["cv"]
+            assert tb["uploadHref"].endswith("/upload/main/contributions"), tb["uploadHref"]
+            cr = subprocess.run([sys.executable, "tests/test_contributions.py", tb["contribution"]],
+                                cwd=ROOT, capture_output=True, text=True, timeout=1200)
+            print("  browser-made contribution → merge:", (cr.stdout.strip().splitlines() or ["?"])[-1])
+            if cr.returncode:
+                sys.exit(cr.stdout[-2000:] + cr.stderr[-2000:])
             if tb.get("merged"):
                 m = tb["merged"]
                 print(f"  + base data merged: base {m['n_base']} / user {m['n_user']}  "

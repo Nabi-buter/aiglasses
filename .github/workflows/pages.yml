@@ -1,11 +1,13 @@
 name: Deploy web app to GitHub Pages
 
-# Deploys web/ whenever main (or the repository's default branch) changes,
-# for example after uploading a new web/models/head.json through the GitHub website.
+# Deploys web/ whenever main changes, e.g. after uploading a contribution file to contributions/
+# or a new model through the GitHub website. Every deploy merges ALL contributions with the
+# public base data and retrains the shared model (training/merge_contributions.py), so every
+# device gets a model that grows with every supervisor's data.
 # The github-pages environment only accepts deployments from main.
 on:
   push:
-    paths: ["web/**", ".github/workflows/pages.yml"]
+    paths: ["web/**", "contributions/**", "training/merge_contributions.py", "training/basekit.py", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +27,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy scikit-learn
+      - name: Merge user contributions and retrain the shared model
+        shell: bash
+        run: |
+          status=0
+          python training/merge_contributions.py --report "$RUNNER_TEMP/contributions.md" || status=$?
+          cat "$RUNNER_TEMP/contributions.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit $status
       - uses: actions/configure-pages@v6
         with:
           enablement: true

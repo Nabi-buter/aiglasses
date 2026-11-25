@@ -2,7 +2,7 @@ name: Test pipeline
 
 on:
   push:
-    paths: ["training/**", "tests/**", "web/**", ".github/workflows/test.yml"]
+    paths: ["training/**", "tests/**", "web/**", "contributions/**", ".github/workflows/test.yml"]
   pull_request:
 
 jobs:
@@ -28,5 +28,7 @@ jobs:
         run: node --test tests/tracker.test.mjs
       - name: In-browser training matches scikit-learn
         run: python tests/logreg_parity.py
+      - name: Shared-model contributions (merge, dedupe, reject tampered, quality gate)
+        run: python tests/test_contributions.py
       - name: Synthetic train + Python/browser parity + live view + in-browser training
         run: python tests/test_pipeline.py --browser

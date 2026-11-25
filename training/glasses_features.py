@@ -32,8 +32,11 @@ try:  # iPhone HEIC photos
 except ImportError:
     pass
 
-import mediapipe as mp
-from mediapipe.tasks.python import BaseOptions, vision
+try:
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions, vision
+except ImportError:  # merging feature files (merge_contributions.py) does not need MediaPipe
+    mp = BaseOptions = vision = None
 
 CROP_VERSION = "band+hinges/v1"
 EMBEDDER_FILE = "mobilenet_v3_large.tflite"

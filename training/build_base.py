@@ -27,7 +27,6 @@ Outputs
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
 import html
 import json
@@ -41,18 +40,16 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageOps
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix, roc_auc_score
-from sklearn.model_selection import StratifiedGroupKFold
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import basekit  # noqa: E402
 import build_presence as bp  # noqa: E402
 import glasses_features as gf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 UA = "aiglasses-dataset-builder/0.1 (open-source research tool)"
 API = "https://commons.wikimedia.org/w/api.php"
-CLASSES = ["ai_glasses", "no_glasses", "regular_glasses"]   # == train.py (sorted)
+CLASSES = basekit.CLASSES
 
 # Commons categories -> (class, device tag). Sub-categories are followed (depth 3) except EXCLUDE.
 COMMONS = {
@@ -287,28 +284,6 @@ def open_images_rows(args, rng):
     return rows
 
 
-# ----------------------------------------------------------------- training + export
-
-def evaluate(X, y, groups, C_grid):
-    cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=0)
-    folds = list(cv.split(X, y, groups))
-    best = None
-    for C in C_grid:
-        P = np.zeros((len(y), len(CLASSES)))
-        for tr, te in folds:
-            m = LogisticRegression(C=C, max_iter=5000, class_weight="balanced").fit(X[tr], y[tr])
-            P[te] = m.predict_proba(X[te])
-        acc = float((P.argmax(1) == y).mean())
-        print(f"  C={C:<5} CV accuracy {acc:.4f}")
-        if best is None or acc > best[1]:
-            best = (C, acc, P)
-    return best
-
-
-def rates(t, p_ai, mask_pos, mask_neg):
-    return float((p_ai[mask_pos] >= t).mean()) if mask_pos.any() else None, float((p_ai[mask_neg] >= t).mean()) if mask_neg.any() else None
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache", type=Path, required=True)
@@ -368,71 +343,11 @@ def main():
         (args.review_sheet.with_suffix(".txt")).write_text("\n".join(f"{i}\t{t}" for i, (t, _) in enumerate(review)))
         print(f"review sheet: {args.review_sheet}")
 
-    C, acc, P = evaluate(X, y, groups, (0.1, 0.3, 1.0, 3.0))
-    p_ai = P[:, 0]
-    is_ai, is_reg, is_none = (y == 0) & orig, (y == 2) & orig, (y == 1) & orig
-    is_c_reg = is_reg & (device == "commons_regular")
-    # Threshold: highest recall while flagging at most max_false_alarm of regular glasses.
-    cand = np.unique(np.round(p_ai[is_reg], 4))
-    suspect = 0.5
-    for t in sorted(cand):
-        if (p_ai[is_reg] >= t).mean() <= args.max_false_alarm:
-            suspect = float(t)
-            break
-    ai_t = max(suspect, 0.6)
-    for t in sorted(cand):
-        if t >= suspect and (p_ai[is_reg] >= t).mean() <= args.max_false_alarm / 3:
-            ai_t = max(float(t), suspect)
-            break
-    auc = float(roc_auc_score(is_ai[orig], p_ai[orig])) if is_ai.any() else None
-    per_device = {d: round(float((p_ai[is_ai & (device == d)] >= suspect).mean()), 4)
-                  for d in sorted(set(device[is_ai]))}
-    rec, fa = rates(suspect, p_ai, is_ai, is_reg)
-    _, fa_c = rates(suspect, p_ai, is_ai, is_c_reg)
-    _, fa_none = rates(suspect, p_ai, is_ai, is_none)
-    cm = confusion_matrix(y[orig], P[orig].argmax(1), labels=range(3))
-    print(f"chosen C={C}: CV accuracy {acc:.4f}  AI AUC {auc:.4f}")
-    print(f"red-box threshold {suspect:.3f}: AI recall {rec:.3f} | false alarm regular {fa:.3f} "
-          f"(Commons regular {fa_c}) no-glasses {fa_none:.3f} | per device {per_device}")
-    print("confusion (rows=true, cols=pred)", CLASSES, cm.tolist())
-
-    model = LogisticRegression(C=C, max_iter=5000, class_weight="balanced").fit(X, y)
-    r4 = lambda v: None if v is None else round(float(v), 4)  # noqa: E731
-    head = {
-        "format": "ai-glasses-head/v1", "embedder": gf.EMBEDDER_FILE, "crop": gf.CROP_VERSION,
-        "feature_dim": gf.FEATURE_DIM, "classes": CLASSES, "ai_class": "ai_glasses",
-        "W": [[round(float(v), 6) for v in row] for row in model.coef_],
-        "b": [round(float(v), 6) for v in model.intercept_],
-        "thresholds": {"ai": round(ai_t, 4), "suspect": round(suspect, 4)}, "C": C,
-        "trained_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "n_images": {c: int(((y == i) & orig).sum()) for i, c in enumerate(CLASSES)},
-        "cv": {"accuracy": r4(acc), "ai_recall": r4(cm[0, 0] / max(cm[0].sum(), 1)),
-               "ai_precision": r4(cm[0, 0] / max(cm[:, 0].sum(), 1)), "confusion": cm.tolist(), "folds": 5,
-               "ai_auc": r4(auc),
-               "at_suspect": {"threshold": r4(suspect), "recall": r4(rec), "false_alarm": r4((p_ai[~is_ai & orig] >= suspect).mean()),
-                              "false_alarm_regular": r4(fa)},
-               "at_ai": {"threshold": r4(ai_t), "recall": r4((p_ai[is_ai] >= ai_t).mean()),
-                         "false_alarm": r4((p_ai[~is_ai & orig] >= ai_t).mean()), "false_alarm_regular": r4((p_ai[is_reg] >= ai_t).mean())},
-               "ai_recall_by_device": per_device, "false_alarm_commons_regular": r4(fa_c)},
-        "test": None, "base": True, "trainer": "build_base.py",
-        "note": "기본 모델 (공개 데이터: Open Images, Wikimedia Commons). 기초 수준이며, 직접 모은 사진을 더해 학습하면 좋아집니다.",
-    }
+    head = basekit.fit_head(X, y, groups, device, flip, max_false_alarm=args.max_false_alarm, base=True,
+                            trainer="build_base.py",
+                            note="기본 모델 (공개 데이터: Open Images, Wikimedia Commons). 기초 수준이며, 직접 모은 사진을 더해 학습하면 좋아집니다.")
     (args.models / "head.json").write_text(json.dumps(head, ensure_ascii=False, separators=(",", ":")))
-
-    # Base data: int8 with one float32 scale per row (dequantised: q * scale).
-    scale = np.maximum(np.abs(X).max(1), 1e-8) / 127.0
-    q = np.clip(np.round(X / scale[:, None]), -127, 127).astype(np.int8)
-    (args.models / "base_data.bin").write_bytes(q.tobytes() + scale.astype(np.float32).tobytes())
-    gnames = sorted(set(groups.tolist()))
-    dnames = sorted(set(device.tolist()))
-    (args.models / "base_data.json").write_text(json.dumps({
-        "format": "ai-glasses-basedata/v1", "crop": gf.CROP_VERSION, "dim": gf.FEATURE_DIM, "n": int(len(y)),
-        "classes": CLASSES, "y": y.tolist(), "group": [gnames.index(g) for g in groups], "groups": gnames,
-        "source": [dnames.index(d) for d in device], "sources": dnames, "flip": flip.tolist(),
-        "encoding": "int8 row-major n×dim, then float32 scale[n]; value = int8 * scale",
-        "credits": "Open Images V7 (CC BY 4.0 annotations, CC BY 2.0 images); Wikimedia Commons (see docs/BASE_DATA_SOURCES.md)",
-        "trained_head_at": head["trained_at"],
-    }, separators=(",", ":")))
+    basekit.save_base_data(args.models, X, y, groups, device, flip, {"trained_head_at": head["trained_at"], "n_contributions": 0})
 
     lines = ["# 기본 데이터 출처", "",
              "`web/models/head.json`(기본 모델)과 `web/models/base_data.*`(기본 데이터의 특징값)는 아래 공개 자료로 만들었습니다.",

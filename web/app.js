@@ -5,6 +5,7 @@ import { makeZip } from "./zip.js";
 const $ = (id) => document.getElementById(id);
 const LOG_KEY = "aiGlassesLog.v2";
 const HEAD_KEY = "aiGlassesCustomHead.v1";
+const PREF_KEY = "aiGlassesHeadPref.v1";   // "<custom|shared>|<device model trained_at>|<shared model trained_at>"
 const OPT_KEY = "aiGlassesOptions.v1";
 const PHOTO_MIN_FACE = 40;          // photos are chosen deliberately: classify smaller faces too
 const COLLECT_EVERY_MS = 600;
@@ -85,19 +86,32 @@ async function loadModels() {
     const r = await fetch("models/presence.json", { cache: "no-cache" });
     if (r.ok) state.presence = validatePresence(await r.json());
   } catch (e) { console.warn("presence.json:", e); }
-  const custom = read(HEAD_KEY);
-  if (custom) {
-    try { useHead(validateHead(JSON.parse(custom)), "custom"); } catch { store(HEAD_KEY, null); }
-  }
-  if (!state.head) await loadBundledHead();
-  if (!state.head) useHead(null, "");
+  let custom = null;
+  try { custom = read(HEAD_KEY) && validateHead(JSON.parse(read(HEAD_KEY))); } catch { store(HEAD_KEY, null); }
+  const shared = await fetchShared();
+  state.customHead = custom; state.sharedHead = shared;
+  // The shared model keeps growing with everyone's contributions: when it is newer than the
+  // model trained on this device, use it (the device model stays saved and can be chosen again).
+  // A manual choice holds only while both models stay the same; a new shared model wins again.
+  const [choice, cts, sts] = (read(PREF_KEY) || "").split("|");
+  const chosen = custom && shared && cts === custom.trained_at && sts === shared.trained_at ? choice : null;
+  const newest = !shared ? "custom" : !custom ? "shared" : Date.parse(custom.trained_at) > Date.parse(shared.trained_at) ? "custom" : "shared";
+  const pick = chosen || newest;
+  if (pick === "custom" && custom) useHead(custom, "custom");
+  else if (shared) useHead(shared, "bundled");
+  else useHead(null, "");
   updateButtons();
 }
-async function loadBundledHead() {
+async function fetchShared() {
   try {
     const r = await fetch("models/head.json", { cache: "no-cache" });
-    if (r.ok) useHead(validateHead(await r.json()), "bundled");
+    if (r.ok) return validateHead(await r.json());
   } catch (e) { console.warn("head.json:", e); }
+  return null;
+}
+async function loadBundledHead() {
+  const h = await fetchShared();
+  if (h) { state.sharedHead = h; useHead(h, "bundled"); }
 }
 
 function useHead(head, source) {
@@ -136,7 +150,22 @@ function renderModelInfo() {
   }
   const dl = el("dl");
   const add = (k, v) => { if (v == null || v === "") return; dl.append(el("dt", null, k), el("dd", null, String(v))); };
-  add("출처", (state.headSource === "custom" ? "직접 불러온 파일 (이 브라우저에 저장됨)" : "배포에 포함된 모델") +
+  const C = state.customHead, S = state.sharedHead;
+  if (C && S) {
+    const sw = el("div", "setup");
+    const usingShared = state.headSource !== "custom";
+    sw.append(el("p", null, usingShared
+      ? `공용 모델(${new Date(S.trained_at).toLocaleString("ko-KR")})을 쓰는 중입니다. 이 기기에서 학습한 모델(${new Date(C.trained_at).toLocaleString("ko-KR")})도 저장되어 있습니다.`
+      : `이 기기에서 학습한 모델을 쓰는 중입니다 (이 브라우저에만 있음). 공용 모델: ${new Date(S.trained_at).toLocaleString("ko-KR")}${Date.parse(S.trained_at) > Date.parse(C.trained_at) ? " — 더 최신입니다" : ""}.`));
+    const b = el("button", "small", usingShared ? "이 기기에서 학습한 모델 쓰기" : "공용 모델 쓰기");
+    b.onclick = () => {
+      store(PREF_KEY, `${usingShared ? "custom" : "shared"}|${C.trained_at}|${S.trained_at}`);
+      if (usingShared) useHead(C, "custom"); else useHead(S, "bundled");
+    };
+    sw.append(b); box.append(sw);
+  }
+  if (h.n_contributions != null) add("공용 데이터", `공개 데이터 + 사용자 기여 ${h.n_contributions}건` + (h.n_contrib ? ` (기여 얼굴: ${Object.entries(h.n_contrib).map(([c, n]) => `${CLASS_NAMES[c] || c} ${n}`).join(" · ")})` : ""));
+  add("출처", (state.headSource === "custom" ? "이 기기에서 학습했거나 불러온 모델 (이 브라우저에만 저장됨)" : "공용 모델 (모든 기기에 같은 모델)") +
     (h.base ? " · 기본 모델 (공개 데이터만으로 학습한 기초 수준)" : h.base_data ? " · 기본 공개 데이터 + 직접 모은 사진" : ""));
   if (h.n_user) add("직접 모은 사진", Object.entries(h.n_user).map(([c, n]) => `${CLASS_NAMES[c] || c} ${n}`).join(" · "));
   if (h.cv?.user?.at_suspect) add("내 사진 기준 성능", `AI 안경 탐지 ${pct(h.cv.user.at_suspect.recall)} · 일반 안경 오탐 ${pct(h.cv.user.at_suspect.false_alarm_regular ?? h.cv.user.at_suspect.false_alarm)}`);
@@ -661,6 +690,8 @@ async function loadHeadFile(file) {
   try {
     const head = validateHead(JSON.parse(await file.text()));
     if (!store(HEAD_KEY, JSON.stringify(head))) console.warn("head not persisted");
+    state.customHead = head;
+    if (state.sharedHead) store(PREF_KEY, `custom|${head.trained_at}|${state.sharedHead.trained_at}`);
     useHead(head, "custom");
     showAlert("새 판독 모델을 불러왔습니다.");
   } catch (e) {
@@ -668,7 +699,7 @@ async function loadHeadFile(file) {
   }
 }
 async function resetHead() {
-  store(HEAD_KEY, null); state.head = null;
+  store(HEAD_KEY, null); store(PREF_KEY, null); state.head = null; state.customHead = null;
   await loadBundledHead();
   if (!state.head) useHead(null, "");
 }

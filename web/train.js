@@ -123,6 +123,8 @@ function renderData(errors = []) {
   const box = $("dataSummary"); box.replaceChildren();
   const by = summary(), total = state.items.size;
   $("clearData").disabled = !total || state.running;
+  $("sharePanel").hidden = !total;
+  $("makeShare").disabled = !total || state.running || !$("consent").checked;
   $("trainBtn").disabled = state.running || (useBase() ? total < 5 : !REQUIRED.every((c) => by[c]?.n >= 5));
   if (!total) {
     if (errors.length) box.append(el("div", "err", errors.join("\n")));
@@ -470,16 +472,80 @@ function renderResults(head, pAi, isAi, isReg, rows, ext) {
 /* ---------------- apply ---------------- */
 $("useHere").onclick = () => {
   if (!state.head) return;
-  try { localStorage.setItem(HEAD_KEY, JSON.stringify(state.head)); } catch { return notice("applyMsg", "err", "이 브라우저에 저장하지 못했습니다. ‘head.json 내려받기’ 후 판독 화면에서 ‘모델 파일 불러오기’를 쓰세요."); }
+  try { localStorage.setItem(HEAD_KEY, JSON.stringify(state.head)); localStorage.removeItem("aiGlassesHeadPref.v1"); } catch { return notice("applyMsg", "err", "이 브라우저에 저장하지 못했습니다. ‘head.json 내려받기’ 후 판독 화면에서 ‘모델 파일 불러오기’를 쓰세요."); }
   const m = el("div", "setup");
   const a = el("a", "btn primary", "실시간 판독 화면 열기"); a.href = "./";
-  m.append(el("p", null, "이 기기의 판독 화면이 새 모델을 씁니다. (다른 기기에는 아래 방법으로 배포하세요)"), a);
+  m.append(el("p", null, "이 기기(이 브라우저)의 판독 화면이 새 모델을 씁니다. 다른 기기와 다른 사용자에게는 적용되지 않습니다 — 아래 ‘공용 모델에 기여’로 올리면 모두의 공용 모델에 합쳐집니다."), a);
   $("applyMsg").replaceChildren(m);
 };
 $("dlHead").onclick = () => {
   if (!state.head) return;
   download(new Blob([JSON.stringify(state.head)], { type: "application/json" }), "head.json");
 };
+
+/* ---------------- contribution to the shared model ---------------- */
+// File format: ai-glasses-contribution/v1 (read by training/merge_contributions.py).
+// Features only, int8 per row + float32 scale per row (same encoding as base_data.bin).
+const REPO = (() => {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/i), repo = location.pathname.split("/").filter(Boolean)[0];
+  return m && repo ? `${m[1]}/${repo}` : "Nabi-buter/aiglasses";
+})();
+function b64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+/** Device tag from collected file names: "<person>__<device>_<YYYYMMDD>_..." */
+function deviceOf(path) {
+  const stem = path.split("/").pop().replace(/\.[^.]+$/, ""), after = stem.split("__")[1] || "";
+  const tok = after.split("_")[0];
+  return tok && !/^\d/.test(tok) ? tok.toLowerCase().slice(0, 32) : "unknown";
+}
+async function sha256hex(text) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return [...h].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function makeContribution() {
+  if (state.running) return;
+  if (!$("consent").checked) return notice("shareMsg", "warnbox", "동의 확인란을 먼저 체크하세요.");
+  state.running = true; $("makeShare").disabled = true;
+  try {
+    const ext = await extractAll($("flip").checked);
+    const rows = ext.rows;
+    if (!rows.length) throw new Error("넣은 사진에서 얼굴을 찾지 못했습니다.");
+    const n = rows.length, salt = crypto.getRandomValues(new Uint32Array(4)).join("-");
+    const q = new Int8Array(n * D), scale = new Float32Array(n);
+    rows.forEach((r, i) => {
+      let m = 0;
+      for (let j = 0; j < D; j++) m = Math.max(m, Math.abs(r.feat[j]));
+      const sc = Math.max(m, 1e-8) / 127; scale[i] = sc;
+      for (let j = 0; j < D; j++) q[i * D + j] = Math.max(-127, Math.min(127, Math.round(r.feat[j] / sc)));
+    });
+    const classes = KNOWN.filter((c) => rows.some((r) => r.label === c));
+    const gNames = [...new Set(rows.map((r) => r.group))], groups = [];
+    for (const g of gNames) groups.push((await sha256hex(salt + "|" + g)).slice(0, 12));   // anonymised person/session
+    const devs = [...new Set(rows.map((r) => (r.label === AI ? deviceOf(r.item.path) : "")))];
+    const d = new Date(), p2 = (v) => String(v).padStart(2, "0");
+    const id = `c_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}_${salt.split("-")[0].slice(-6)}`;
+    const counts = Object.fromEntries(classes.map((c) => [c, rows.filter((r) => r.label === c && !r.flip).length]));
+    const file = {
+      format: "ai-glasses-contribution/v1", id, created_at: d.toISOString().replace(/\.\d+Z$/, "Z"),
+      crop: CROP_VERSION, dim: D, n, classes, counts,
+      y: rows.map((r) => classes.indexOf(r.label)), group: rows.map((r) => gNames.indexOf(r.group)), groups,
+      flip: rows.map((r) => (r.flip ? 1 : 0)), device: rows.map((r) => devs.indexOf(r.label === AI ? deviceOf(r.item.path) : "")), devices: devs,
+      note: $("shareNote").value.trim().slice(0, 120), consent: true, app: "web/train.js",
+      data_b64: b64(new Uint8Array(q.buffer)), scale_b64: b64(new Uint8Array(scale.buffer)),
+    };
+    download(new Blob([JSON.stringify(file)], { type: "application/json" }), `${id}.json`);
+    state.contribution = file;
+    const a = $("uploadLink"); a.href = `https://github.com/${REPO}/upload/main/contributions`; a.hidden = false;
+    notice("shareMsg", "setup", `${id}.json 을 내려받았습니다 (얼굴 ${Object.entries(counts).map(([c, k]) => `${NAMES[c]} ${k}`).join(" · ")}, 좌우 반전 포함 ${n}행, 약 ${Math.round((n * D * 1.37) / 1024)}KB). ‘GitHub에 올리기’를 눌러 이 파일을 올리세요.`);
+  } catch (e) {
+    notice("shareMsg", "err", String(e.message || e));
+  } finally {
+    state.running = false; renderData();
+  }
+}
 
 /* ---------------- wire up ---------------- */
 $("zipIn").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
@@ -502,6 +568,8 @@ drop.addEventListener("drop", async (e) => {
 });
 window.__train = state;
 $("withBase").onchange = () => renderData();
+$("consent").onchange = () => renderData();
+$("makeShare").onclick = makeContribution;
 renderData();
 loadBase().then((b) => {
   if (!b) { $("withBase").checked = false; $("withBase").disabled = true; $("withBaseText").textContent = "기본 공개 데이터 없음 (이 배포에 포함되지 않음)"; }

@@ -24,6 +24,9 @@
 > - **추가 학습:** 앱의 **학습 데이터 수집**으로 사진을 모아 **모델 학습** 페이지에 넣습니다.
 >   - 기본 데이터와 합쳐 다시 학습하므로 사진이 몇 장이어도 세 가지 판정이 유지됩니다.
 >   - 직접 찍은 조건(기종·조명·거리)에 맞게 정확해집니다.
+> - **여러 감독관의 데이터 합치기:** 학습 페이지에서 만든 모델은 그 기기에만 적용됩니다.
+>   - **공용 모델에 기여**로 특징값 파일을 저장소에 올리면, 배포할 때마다 모든 기여를 합쳐 다시 학습해 **모든 기기에 배포**합니다.
+>   - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)를 보세요.
 > - 데이터 수집 요령은 [docs/DATA.md](docs/DATA.md)에 있습니다.
 
 ## 동작 방식
@@ -157,11 +160,18 @@ python3 -m http.server 8000
 | 학습 사진 (얼굴 포함) | **감독관 PC에 ZIP으로 보관**, 웹의 모델 학습 페이지에 넣어 학습 | 개인정보입니다. 저장소(GitHub)에 올리지 않습니다 |
 | 학습된 모델 `head.json` (숫자만) | **저장소 `web/models/head.json`** | 올리면 웹 주소로 접속하는 모든 기기가 자동으로 같은 모델을 씁니다 |
 
-### 모든 감독관 기기에 모델 배포
+### 모든 감독관 기기에 모델 배포 (공용 모델)
 
-1. 모델 학습 페이지에서 **head.json 내려받기**
-2. GitHub 저장소 → `web/models` 폴더 → **Add file → Upload files** → `head.json` 올리고 **Commit changes** (main 브랜치)
-3. 1~2분 뒤 GitHub Actions가 자동으로 다시 배포합니다. 감독관은 웹 주소를 새로 고치면 됩니다.
+여러 감독관의 데이터를 합쳐 **공용 모델**을 키웁니다. 서버 없이 GitHub만 씁니다.
+1. 각 감독관이 **모델 학습 → 5. 공용 모델에 기여**로 기여 파일을 만듭니다. 파일에는 사진 없이 특징값만 들어 있습니다.
+2. 그 파일을 저장소 `contributions/`에 올립니다(관리자가 아니면 Pull request가 됩니다).
+3. main에 들어오면 배포 워크플로가 **공개 데이터 + 모든 기여**로 다시 학습합니다.
+   - 품질 기준을 통과하면 새 공용 모델과 공용 데이터를 배포합니다. 모든 기기는 새로 고치면 새 모델을 씁니다.
+   - 저장소에는 큰 파일이 쌓이지 않습니다. 합친 결과는 배포된 사이트에만 올라갑니다.
+
+자세한 흐름과 안전장치는 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)에 있습니다.
+
+판독 화면은 공용 모델이 그 기기에서 학습한 모델보다 새것이면 **자동으로 공용 모델을 씁니다**. ‘판독 모델’ 칸에서 기기 모델로 되돌릴 수 있습니다.
 
 ## 모델 학습
 
@@ -232,6 +242,7 @@ python tests/test_pipeline.py            # 합성 데이터 → 학습 → 예�
 python tests/test_pipeline.py --browser  # + 브라우저와 결과가 같은지, 가짜 웹캠으로 실시간 화면 검사 (Node + Playwright 필요)
 node --test tests/tracker.test.mjs        # 추적·평균·ZIP 단위 테스트
 python tests/logreg_parity.py             # 브라우저 학습(web/logreg.js) == scikit-learn
+python tests/test_contributions.py        # 기여 합치기: 중복·변조·동의 없음 거부, 품질 기준, 멱등성
 ```
 
 `tests/make_synthetic.py`는 scikit-image에 포함된 공개 사진에 만화 같은 안경을 그려 **배관 점검용** 데이터를 만듭니다.
@@ -262,7 +273,10 @@ training/
   predict.py              명령줄 판독
   build_presence.py       안경 착용 판독 보조 모델 만들기 (Open Images)
   build_base.py           기본 모델과 기본 데이터 만들기 (Open Images + Wikimedia Commons)
+  basekit.py              공용 모델 학습·평가·내보내기 (numpy + scikit-learn만 필요)
+  merge_contributions.py  모든 기여 파일을 합쳐 공용 모델 재학습 (배포할 때마다 실행)
   base_exclude.json       기본 데이터에서 검수 후 뺀 사진과 이유
+contributions/            사용자 기여 파일 (특징값만, 사진 없음) → 공용 모델
 tests/                    합성 데이터·가짜 웹캠 생성, 파이프라인·브라우저 일치, 실시간 화면 E2E, 단위 테스트
 scripts/fetch_assets.sh   MediaPipe 런타임·모델 다시 받기 (버전 올릴 때)
 docs/DATA.md              학습 데이터 수집 가이드
