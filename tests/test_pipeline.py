@@ -128,8 +128,8 @@ def main():
             tshot = str(shot).replace(".png", "_train.png")
             tr = subprocess.run(["node", "tests/train_e2e.cjs", base, str(zpath), tshot],
                                 cwd=ROOT, capture_output=True, text=True, env=env, timeout=1200)
-            srv.shutdown()
             if tr.returncode:
+                srv.shutdown()
                 sys.exit(tr.stderr)
             tb = json.loads(tr.stdout)
             hb = tb["head"]
@@ -142,6 +142,20 @@ def main():
             print("  browser-made contribution → merge:", (cr.stdout.strip().splitlines() or ["?"])[-1])
             if cr.returncode:
                 sys.exit(cr.stdout[-2000:] + cr.stderr[-2000:])
+            # "바로 적용" against a mock GitHub API, then the committed file through the real merge.
+            dpath = tmp / "direct_contribution.json"
+            ds = subprocess.run(["node", "tests/direct_submit_e2e.cjs", base, str(zpath), str(dpath)],
+                                cwd=ROOT, capture_output=True, text=True, env=env, timeout=1200)
+            srv.shutdown()
+            if ds.returncode:
+                sys.exit(ds.stderr[-2000:])
+            dr = json.loads(ds.stdout)
+            assert dr["refPatches"] == 2 and "토큰" in dr["badMsg"], dr
+            dm = subprocess.run([sys.executable, "tests/test_contributions.py", str(dpath)], cwd=ROOT, capture_output=True, text=True, timeout=1200)
+            print(f"  direct submit (mock GitHub): {dr['n']} rows committed, retried after a moved main → merge:",
+                  (dm.stdout.strip().splitlines() or ["?"])[-1])
+            if dm.returncode:
+                sys.exit(dm.stdout[-2000:] + dm.stderr[-2000:])
             if tb.get("merged"):
                 m = tb["merged"]
                 print(f"  + base data merged: base {m['n_base']} / user {m['n_user']}  "

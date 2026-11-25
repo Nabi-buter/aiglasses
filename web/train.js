@@ -157,6 +157,7 @@ function renderData(errors = []) {
   $("clearData").disabled = !(total || state.pending.length) || state.running;
   $("sharePanel").hidden = !total;
   $("makeShare").disabled = !total || state.running || !$("consent").checked || state.pending.length > 0;
+  renderTokenState();
   const why = trainBlocker(by, total);
   $("trainBtn").disabled = !!why;
   $("trainWhy").textContent = why;
@@ -565,47 +566,152 @@ async function sha256hex(text) {
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
   return [...h].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-async function makeContribution() {
+async function buildContribution() {
+  const ext = await extractAll($("flip").checked);
+  const rows = ext.rows;
+  if (!rows.length) throw new Error("넣은 사진에서 얼굴을 찾지 못했습니다.");
+  const n = rows.length, salt = crypto.getRandomValues(new Uint32Array(4)).join("-");
+  const q = new Int8Array(n * D), scale = new Float32Array(n);
+  rows.forEach((r, i) => {
+    let m = 0;
+    for (let j = 0; j < D; j++) m = Math.max(m, Math.abs(r.feat[j]));
+    const sc = Math.max(m, 1e-8) / 127; scale[i] = sc;
+    for (let j = 0; j < D; j++) q[i * D + j] = Math.max(-127, Math.min(127, Math.round(r.feat[j] / sc)));
+  });
+  const classes = KNOWN.filter((c) => rows.some((r) => r.label === c));
+  const gNames = [...new Set(rows.map((r) => r.group))], groups = [];
+  for (const g of gNames) groups.push((await sha256hex(salt + "|" + g)).slice(0, 12));   // anonymised person/session
+  const devs = [...new Set(rows.map((r) => (r.label === AI ? deviceOf(r.item.path) : "")))];
+  const d = new Date(), p2 = (v) => String(v).padStart(2, "0");
+  const id = `c_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}_${salt.split("-")[0].slice(-6)}`;
+  const counts = Object.fromEntries(classes.map((c) => [c, rows.filter((r) => r.label === c && !r.flip).length]));
+  const file = {
+    format: "ai-glasses-contribution/v1", id, created_at: d.toISOString().replace(/\.\d+Z$/, "Z"),
+    crop: CROP_VERSION, dim: D, n, classes, counts,
+    y: rows.map((r) => classes.indexOf(r.label)), group: rows.map((r) => gNames.indexOf(r.group)), groups,
+    flip: rows.map((r) => (r.flip ? 1 : 0)), device: rows.map((r) => devs.indexOf(r.label === AI ? deviceOf(r.item.path) : "")), devices: devs,
+    note: $("shareNote").value.trim().slice(0, 120), consent: true, app: "web/train.js",
+    data_b64: b64(new Uint8Array(q.buffer)), scale_b64: b64(new Uint8Array(scale.buffer)),
+  };
+  const summary = `얼굴 ${Object.entries(counts).map(([c, k]) => `${NAMES[c]} ${k}`).join(" · ")}, 좌우 반전 포함 ${n}행, 약 ${Math.round((n * D * 1.37) / 1024)}KB`;
+  return { file, id, summary };
+}
+
+async function withContribution(fn) {
   if (state.running) return;
   if (!$("consent").checked) return notice("shareMsg", "warnbox", "동의 확인란을 먼저 체크하세요.");
-  state.running = true; $("makeShare").disabled = true;
+  state.running = true; renderData();
+  try { await fn(await buildContribution()); }
+  catch (e) { console.error(e); notice("shareMsg", "err", String(e.message || e)); }
+  finally { state.running = false; renderData(); }
+}
+
+const makeContribution = () => withContribution(async ({ file, id, summary }) => {
+  download(new Blob([JSON.stringify(file)], { type: "application/json" }), `${id}.json`);
+  const a = $("uploadLink"); a.href = `https://github.com/${REPO}/upload/main/contributions`; a.hidden = false;
+  notice("shareMsg", "setup", `${id}.json 을 내려받았습니다 (${summary}). ‘GitHub에 올리기’를 눌러 이 파일을 올리세요.`);
+});
+
+/* ---------------- direct submit to the repository (owner / collaborators with a token) ---------------- */
+// The token stays in THIS browser only (localStorage) and is sent only to api.github.com.
+// It needs: fine-grained token, only this repository, "Contents: Read and write".
+const TOKEN_KEY = "aiGlassesGithubToken.v1";
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } };
+async function gh(path, { method = "GET", body, token = getToken() } = {}) {
+  const r = await fetch(`https://api.github.com${path}`, {
+    method, cache: "no-store",
+    headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28",
+      ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = r.status === 401 ? "토큰이 올바르지 않거나 만료되었습니다."
+      : r.status === 403 || r.status === 404 ? "이 토큰으로는 저장소에 쓸 수 없습니다 (이 저장소 선택 + Contents: Read and write 권한 필요)."
+      : r.status === 409 || r.status === 422 ? "저장소가 그 사이에 바뀌었습니다."
+      : `GitHub 오류 ${r.status}`;
+    throw Object.assign(new Error(`${msg} (${data.message || r.statusText})`), { status: r.status });
+  }
+  return data;
+}
+async function checkToken(token) {
+  const repo = await gh(`/repos/${REPO}`, { token });
+  if (!repo.permissions?.push) throw new Error("이 토큰에는 저장소 쓰기 권한이 없습니다 (Contents: Read and write).");
+  return repo;
+}
+function renderTokenState() {
+  const has = !!getToken();
+  $("tokenSet").hidden = has; $("tokenOn").hidden = !has;
+  $("submitDirect").disabled = !has || state.running || !$("consent").checked || !state.items.size || state.pending.length > 0;
+}
+async function saveToken() {
+  const t = $("tokenIn").value.trim();
+  if (!t) return;
+  $("tokenSave").disabled = true;
   try {
-    const ext = await extractAll($("flip").checked);
-    const rows = ext.rows;
-    if (!rows.length) throw new Error("넣은 사진에서 얼굴을 찾지 못했습니다.");
-    const n = rows.length, salt = crypto.getRandomValues(new Uint32Array(4)).join("-");
-    const q = new Int8Array(n * D), scale = new Float32Array(n);
-    rows.forEach((r, i) => {
-      let m = 0;
-      for (let j = 0; j < D; j++) m = Math.max(m, Math.abs(r.feat[j]));
-      const sc = Math.max(m, 1e-8) / 127; scale[i] = sc;
-      for (let j = 0; j < D; j++) q[i * D + j] = Math.max(-127, Math.min(127, Math.round(r.feat[j] / sc)));
-    });
-    const classes = KNOWN.filter((c) => rows.some((r) => r.label === c));
-    const gNames = [...new Set(rows.map((r) => r.group))], groups = [];
-    for (const g of gNames) groups.push((await sha256hex(salt + "|" + g)).slice(0, 12));   // anonymised person/session
-    const devs = [...new Set(rows.map((r) => (r.label === AI ? deviceOf(r.item.path) : "")))];
-    const d = new Date(), p2 = (v) => String(v).padStart(2, "0");
-    const id = `c_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}_${salt.split("-")[0].slice(-6)}`;
-    const counts = Object.fromEntries(classes.map((c) => [c, rows.filter((r) => r.label === c && !r.flip).length]));
-    const file = {
-      format: "ai-glasses-contribution/v1", id, created_at: d.toISOString().replace(/\.\d+Z$/, "Z"),
-      crop: CROP_VERSION, dim: D, n, classes, counts,
-      y: rows.map((r) => classes.indexOf(r.label)), group: rows.map((r) => gNames.indexOf(r.group)), groups,
-      flip: rows.map((r) => (r.flip ? 1 : 0)), device: rows.map((r) => devs.indexOf(r.label === AI ? deviceOf(r.item.path) : "")), devices: devs,
-      note: $("shareNote").value.trim().slice(0, 120), consent: true, app: "web/train.js",
-      data_b64: b64(new Uint8Array(q.buffer)), scale_b64: b64(new Uint8Array(scale.buffer)),
-    };
-    download(new Blob([JSON.stringify(file)], { type: "application/json" }), `${id}.json`);
-    state.contribution = file;
-    const a = $("uploadLink"); a.href = `https://github.com/${REPO}/upload/main/contributions`; a.hidden = false;
-    notice("shareMsg", "setup", `${id}.json 을 내려받았습니다 (얼굴 ${Object.entries(counts).map(([c, k]) => `${NAMES[c]} ${k}`).join(" · ")}, 좌우 반전 포함 ${n}행, 약 ${Math.round((n * D * 1.37) / 1024)}KB). ‘GitHub에 올리기’를 눌러 이 파일을 올리세요.`);
-  } catch (e) {
-    notice("shareMsg", "err", String(e.message || e));
-  } finally {
-    state.running = false; renderData();
+    await checkToken(t);
+    try { localStorage.setItem(TOKEN_KEY, t); } catch { throw new Error("이 브라우저에 저장하지 못했습니다."); }
+    $("tokenIn").value = "";
+    notice("shareMsg", "setup", "토큰을 확인했습니다. 이제 ‘기여 만들어 바로 적용’을 쓸 수 있습니다 (토큰은 이 브라우저에만 저장됨).");
+  } catch (e) { notice("shareMsg", "err", String(e.message || e)); }
+  finally { $("tokenSave").disabled = false; renderTokenState(); }
+}
+function forgetToken() { try { localStorage.removeItem(TOKEN_KEY); } catch {} renderTokenState(); notice("shareMsg", "setup", "이 브라우저에서 토큰을 지웠습니다."); }
+
+/** One commit on main adding contributions/<id>.json (Git Data API, works for large files). */
+async function commitContribution(file, id) {
+  const R = `/repos/${REPO}`;
+  const content = b64(new TextEncoder().encode(JSON.stringify(file)));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const ref = await gh(`${R}/git/ref/heads/main`);
+      const head = await gh(`${R}/git/commits/${ref.object.sha}`);
+      const blob = await gh(`${R}/git/blobs`, { method: "POST", body: { content, encoding: "base64" } });
+      const tree = await gh(`${R}/git/trees`, { method: "POST", body: { base_tree: head.tree.sha, tree: [{ path: `contributions/${id}.json`, mode: "100644", type: "blob", sha: blob.sha }] } });
+      const commit = await gh(`${R}/git/commits`, { method: "POST", body: {
+        message: `공용 모델 기여: ${id}\n\n${Object.entries(file.counts).map(([c, k]) => `${c} ${k}`).join(", ")}${file.note ? `\n메모: ${file.note}` : ""}\n(웹 학습 페이지에서 바로 적용)`,
+        tree: tree.sha, parents: [ref.object.sha] } });
+      await gh(`${R}/git/refs/heads/main`, { method: "PATCH", body: { sha: commit.sha, force: false } });
+      return commit;
+    } catch (e) {
+      if ((e.status !== 409 && e.status !== 422) || attempt >= 2) throw e;   // main moved meanwhile: retry on the new head
+    }
   }
 }
+
+async function waitForDeploy(prevTrainedAt, startedAt) {
+  for (let i = 0; i < 60; i++) {           // up to ~15 minutes
+    progress("공용 모델 다시 학습·배포 중 (GitHub Actions)", Math.min(0.95, 0.15 + (Date.now() - startedAt) / 300000),
+      "보통 2~4분 걸립니다. 이 페이지를 닫아도 서버에서 계속 진행됩니다.");
+    await sleep(state.pollMs || 15000);
+    try {
+      const h = await (await fetch(`models/head.json?t=${Date.now()}`, { cache: "no-store" })).json();
+      if (h.trained_at !== prevTrainedAt) return h;
+    } catch {}
+  }
+  return null;
+}
+
+const submitDirect = () => withContribution(async ({ file, id, summary }) => {
+  let prev = null;
+  try { prev = (await (await fetch(`models/head.json?t=${Date.now()}`, { cache: "no-store" })).json()).trained_at; } catch {}
+  progress("저장소에 기여 올리는 중", 0.1, summary);
+  const commit = await commitContribution(file, id);
+  const m = el("div", "setup");
+  const link = el("a", null, "커밋 보기"); link.href = commit.html_url || `https://github.com/${REPO}/commit/${commit.sha}`; link.target = "_blank"; link.rel = "noopener";
+  const run = el("a", null, "배포 진행 보기"); run.href = `https://github.com/${REPO}/actions`; run.target = "_blank"; run.rel = "noopener";
+  const p = el("p", null, `${id}.json 을 저장소에 바로 올렸습니다 (${summary}). 모든 기여를 합친 재학습과 배포가 시작됐습니다. `);
+  p.append(link, document.createTextNode(" · "), run);
+  m.append(p); $("shareMsg").replaceChildren(m);
+  state.lastCommit = commit.sha;
+  const h = await waitForDeploy(prev, Date.now());
+  if (h) {
+    progress("공용 모델이 업데이트되었습니다", 1, `사용자 기여 ${h.n_contributions ?? "?"}건 반영 · 빨간 박스 기준 AI 안경 탐지 ${pct(h.cv?.at_suspect?.recall)} · 일반 안경 오탐 ${pct(h.cv?.at_suspect?.false_alarm_regular)}`);
+    m.append(el("p", null, "모든 기기는 판독 화면을 새로 고치면 새 공용 모델을 씁니다."));
+  } else {
+    progress("배포 확인 시간 초과", 1, "‘배포 진행 보기’에서 결과를 확인하세요. 품질 기준에 못 미치면 배포가 멈추고 이전 모델이 유지됩니다.");
+  }
+});
 
 /* ---------------- wire up ---------------- */
 $("zipIn").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
@@ -632,6 +738,10 @@ window.__train = state;
 $("withBase").onchange = () => renderData();
 $("consent").onchange = () => renderData();
 $("makeShare").onclick = makeContribution;
+$("submitDirect").onclick = submitDirect;
+$("tokenSave").onclick = saveToken;
+$("tokenForget").onclick = forgetToken;
+$("tokenIn").addEventListener("keydown", (e) => { if (e.key === "Enter") saveToken(); });
 renderData();
 loadBase().then((b) => {
   if (!b) { $("withBase").checked = false; $("withBase").disabled = true; $("withBaseText").textContent = "기본 공개 데이터 없음 (이 배포에 포함되지 않음)"; }

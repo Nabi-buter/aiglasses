@@ -163,8 +163,10 @@ python3 -m http.server 8000
 ### 모든 감독관 기기에 모델 배포 (공용 모델)
 
 여러 감독관의 데이터를 합쳐 **공용 모델**을 키웁니다. 서버 없이 GitHub만 씁니다.
-1. 각 감독관이 **모델 학습 → 5. 공용 모델에 기여**로 기여 파일을 만듭니다. 파일에는 사진 없이 특징값만 들어 있습니다.
-2. 그 파일을 저장소 `contributions/`에 올립니다(관리자가 아니면 Pull request가 됩니다).
+1. 각 감독관이 **모델 학습 → 5. 공용 모델에 기여**로 기여를 만듭니다. 사진 없이 특징값만 들어갑니다.
+2. 저장소 `contributions/`에 넣는 방법은 둘입니다.
+   - **바로 적용:** GitHub 토큰을 그 기기에 한 번 등록하면 버튼 하나로 커밋됩니다. 파일을 주고받을 필요가 없습니다.
+   - **파일로 올리기:** 내려받아 GitHub 웹에서 업로드합니다. 관리자가 아니면 Pull request가 됩니다.
 3. main에 들어오면 배포 워크플로가 **공개 데이터 + 모든 기여**로 다시 학습합니다.
    - 품질 기준을 통과하면 새 공용 모델과 공용 데이터를 배포합니다. 모든 기기는 새로 고치면 새 모델을 씁니다.
    - 저장소에는 큰 파일이 쌓이지 않습니다. 합친 결과는 배포된 사이트에만 올라갑니다.
@@ -243,6 +245,7 @@ python tests/test_pipeline.py --browser  # + 브라우저와 결과가 같은지
 node --test tests/tracker.test.mjs        # 추적·평균·ZIP 단위 테스트
 python tests/logreg_parity.py             # 브라우저 학습(web/logreg.js) == scikit-learn
 python tests/test_contributions.py        # 기여 합치기: 중복·변조·동의 없음 거부, 품질 기준, 멱등성
+                                          # (--browser 실행에는 가짜 GitHub API로 ‘바로 적용’ 검사 포함)
 ```
 
 `tests/make_synthetic.py`는 scikit-image에 포함된 공개 사진에 만화 같은 안경을 그려 **배관 점검용** 데이터를 만듭니다.

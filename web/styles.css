@@ -275,3 +275,8 @@ table.log tr.chosen td { background: var(--sus-bg); font-weight: 700; }
 .pending p { margin: 0; }
 .pthumbs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .pthumbs canvas { width: 96px; height: 72px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+.share-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.share-ways .way { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; align-content: start; }
+.share-ways h3 { margin: 0; font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tokenrow { display: grid; gap: 6px; }
+details.howto summary { cursor: pointer; font-size: 13px; color: var(--accent); }

@@ -107,7 +107,7 @@
       <p>여기서 학습한 모델은 <b>이 기기의 이 브라우저에만</b> 적용됩니다. 여러 감독관이 모은 사진을 합쳐 <b>공용 모델</b>을 키우려면, 넣은 사진의 <b>특징값</b>을 기여 파일로 만들어 저장소에 올리세요.</p>
       <ol class="steps">
         <li><b>기여 파일 만들기</b> — 사진은 들어가지 않고, 앱이 계산한 숫자(특징값)·정답·기종·익명화된 사람 묶음만 들어갑니다.</li>
-        <li><b>GitHub에 올리기</b>를 눌러 열린 페이지에 파일을 끌어다 놓고 <b>Commit changes</b> (저장소 관리자가 아니면 자동으로 ‘변경 제안(Pull request)’이 되어 관리자가 확인 후 합칩니다).</li>
+        <li>아래 둘 중 하나로 저장소에 넣습니다: <b>바로 적용</b>(GitHub 토큰을 이 기기에 한 번 등록하면 버튼 하나) 또는 <b>파일로 올리기</b>(내려받아 GitHub 웹에서 업로드).</li>
         <li>합쳐지면 서버(GitHub Actions)가 <b>공개 데이터 + 지금까지의 모든 기여</b>로 다시 학습하고, 품질 기준을 통과하면 공용 모델을 자동으로 바꿔 배포합니다. 모든 기기는 새로 고치면 새 모델을 씁니다.</li>
       </ol>
     </div>
@@ -117,9 +117,37 @@
       </label>
     </div>
     <label class="tog"><input type="checkbox" id="consent"> 사진 속 사람들에게 동의를 받았고, 특징값이 공개 저장소에 올라간다는 것을 이해했습니다.</label>
-    <div class="controls">
-      <button class="primary" id="makeShare" disabled>기여 파일 만들기</button>
-      <a class="btn" id="uploadLink" href="#" target="_blank" rel="noopener" hidden>GitHub에 올리기 ↗</a>
+    <div class="share-ways">
+      <div class="way">
+        <h3>바로 적용 <span class="pill ok">파일 주고받기 없음</span></h3>
+        <p class="hint">저장소 관리자(또는 쓰기 권한을 받은 감독관)용. 버튼 한 번으로 기여가 저장소에 들어가고, 공용 모델이 자동으로 다시 학습·배포됩니다.</p>
+        <div id="tokenSet" class="tokenrow">
+          <label class="f" for="tokenIn">GitHub 토큰 (이 기기에서 처음 한 번)
+            <span class="inl"><input id="tokenIn" type="password" autocomplete="off" placeholder="github_pat_..."><button class="small" id="tokenSave">확인·저장</button></span>
+          </label>
+          <details class="howto"><summary>토큰 만드는 법</summary>
+            <ol class="steps">
+              <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token</a></li>
+              <li><b>Repository access</b>: Only select repositories → 이 저장소만 선택</li>
+              <li><b>Permissions → Repository permissions → Contents</b>: Read and write (다른 권한은 필요 없음)</li>
+              <li>만료일을 정하고 생성 → 나온 토큰을 위 칸에 붙여 넣고 ‘확인·저장’</li>
+            </ol>
+            <p class="hint">토큰은 이 브라우저에만 저장되고 api.github.com 으로만 보내집니다. 함께 쓰는 PC에서는 쓰고 난 뒤 ‘토큰 지우기’를 누르세요.</p>
+          </details>
+        </div>
+        <div id="tokenOn" class="controls" hidden>
+          <button class="primary" id="submitDirect" disabled>기여 만들어 바로 적용</button>
+          <button class="small ghost" id="tokenForget">토큰 지우기</button>
+        </div>
+      </div>
+      <div class="way">
+        <h3>파일로 올리기 <span class="pill na">토큰 없이</span></h3>
+        <p class="hint">기여 파일을 내려받아 GitHub 웹에서 올립니다. 관리자가 아니면 변경 제안(Pull request)이 되어 관리자가 확인한 뒤 합칩니다.</p>
+        <div class="controls">
+          <button id="makeShare" disabled>기여 파일 만들기</button>
+          <a class="btn" id="uploadLink" href="#" target="_blank" rel="noopener" hidden>GitHub에 올리기 ↗</a>
+        </div>
+      </div>
     </div>
     <div id="shareMsg"></div>
   </section>
